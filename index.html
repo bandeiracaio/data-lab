@@ -277,12 +277,15 @@ a{color:inherit;text-decoration:none}
 .tfm-palette-title{font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.07em;color:var(--text-3);padding:2px 6px 8px}
 .tfm-palette-btn{display:flex;align-items:center;gap:8px;padding:7px 10px;border-radius:var(--radius);color:var(--text-2);font-size:12px;font-weight:500;transition:background var(--trans),color var(--trans);text-align:left;width:100%}
 .tfm-palette-btn:hover{background:var(--surface-2);color:var(--text)}
-.tfm-right{display:flex;flex-direction:column;gap:10px}
+.tfm-right{display:flex;flex-direction:column;gap:10px;flex:1;min-width:0}
 .step-card{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:10px 12px}
+.step-card.step-disabled{opacity:.45}
 .step-card-head{display:flex;align-items:center;gap:8px}
 .step-num{font-size:10px;font-weight:600;color:var(--text-3);min-width:14px}
 .step-type{font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;color:var(--accent);background:var(--accent-dim);padding:2px 6px;border-radius:var(--radius);white-space:nowrap}
 .step-summary{font-size:11px;color:var(--text-2);flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-family:var(--mono)}
+.step-count{font-size:10px;color:var(--text-3);white-space:nowrap;font-family:var(--mono);flex-shrink:0}
+.step-count-drop{color:#e05565}
 .step-actions{display:flex;gap:4px;margin-left:auto;flex-shrink:0}
 .tfm-empty{display:flex;align-items:center;justify-content:center;min-height:100px;border:1px dashed var(--border);border-radius:var(--radius);color:var(--text-3);font-size:12px}
 .tfm-banner{background:var(--accent-dim);border:1px solid rgba(79,124,255,.3);border-radius:var(--radius);padding:8px 12px;font-size:12px;color:var(--accent);display:flex;align-items:center;gap:8px;margin-bottom:16px}
@@ -400,6 +403,7 @@ const State = {
   fileName: '',
   totalRows: 0,
   transforms: [],
+  _stepCounts: [],
   currentPage: 'overview',
   prevPage: null,
   columnDetail: null,
@@ -647,13 +651,31 @@ const DataEngine = {
     return this.sampleRows(n);
   },
 
+  exportCSV() {
+    if (!State.data || !State.columns) return;
+    const cols = State.columns.map(c => c.name);
+    const escape = v => {
+      if (v == null) return '';
+      const s = String(v);
+      return (s.includes(',') || s.includes('"') || s.includes('\n')) ? `"${s.replace(/"/g,'""')}"` : s;
+    };
+    const lines = [cols.join(','), ...State.data.map(r => cols.map(c => escape(r[c])).join(','))];
+    const blob = new Blob([lines.join('\n')], { type: 'text/csv' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = (State.fileName || 'data') + '_transformed.csv';
+    a.click();
+    URL.revokeObjectURL(a.href);
+  },
+
   // ── Transform execution ────────────────────────────────────────────────────
 
   recompute() {
     if (!State.rawData) return;
-    const { data, columns } = this.applyTransforms(State.rawData, State._rawColumns, State.transforms);
+    const { data, columns, counts } = this.applyTransforms(State.rawData, State._rawColumns, State.transforms);
     State.data = data;
     State.columns = columns;
+    State._stepCounts = counts;
     const wName = State._originalWeightCol;
     State.weightCol = (wName && columns.some(c => c.name === wName)) ? wName : null;
     State.isCubed = !!State.weightCol;
@@ -665,13 +687,17 @@ const DataEngine = {
   applyTransforms(rawData, rawColumns, steps) {
     let data = rawData.map(r => ({...r}));
     let columns = rawColumns.map(c => ({...c}));
+    const counts = [];
     for (const step of steps) {
+      if (step.enabled === false) { counts.push(null); continue; }
+      const before = data.length;
       try {
         const res = this._tfStep(data, columns, step);
         data = res.data; columns = res.columns;
       } catch(e) { console.warn('Step failed:', step.type, e.message); }
+      counts.push({ before, after: data.length });
     }
-    return { data, columns };
+    return { data, columns, counts };
   },
 
   _tfStep(data, columns, step) {
@@ -984,14 +1010,21 @@ const Charts = {
                 zerolinecolor:this._css('--border'), tickfont:{size:10,color:this._css('--text-2')} },
       }), this._cfg());
     } else {
-      const colors = colorCol && valid[0]?.[colorCol] != null
-        ? valid.map(r => r[colorCol]) : accent;
       const isCatColor = colorCol && State.columns.find(c=>c.name===colorCol)?.type==='categorical';
+      let colors;
+      if (isCatColor) {
+        const cats = [...new Set(valid.map(r => r[colorCol]))];
+        const pal = this._catPalette(cats.length);
+        const cmap = Object.fromEntries(cats.map((c, i) => [c, pal[i]]));
+        colors = valid.map(r => cmap[r[colorCol]]);
+      } else {
+        colors = colorCol && valid[0]?.[colorCol] != null ? valid.map(r => r[colorCol]) : accent;
+      }
       Plotly.newPlot(id, [{
         type:'scattergl', mode:'markers',
         x:xs, y:ys,
         marker:{ size:4, opacity:.6,
-          color: isCatColor ? undefined : colors,
+          color: colors,
           colorscale: isCatColor ? undefined : 'Viridis',
           showscale: (!isCatColor && colorCol) ? true : false,
           colorbar:{ thickness:8, len:.7, tickfont:{size:9,color:this._css('--text-2')} },
@@ -1551,7 +1584,8 @@ const Pages = {
         ${n > 0 ? `<div class="tfm-banner">
           <svg width="13" height="13" viewBox="0 0 13 13" fill="none"><path d="M1.5 3.5h10M3.5 6.5h6M5.5 9.5h2" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
           ${n} step${n > 1 ? 's' : ''} active — Overview and Explore reflect derived data
-          <button class="btn btn-ghost btn-sm" style="margin-left:auto" onclick="Pages.transform.resetAll()">Reset all</button>
+          <button class="btn btn-ghost btn-sm" style="margin-left:auto" onclick="Pages.transform.downloadCSV()">Download CSV</button>
+          <button class="btn btn-ghost btn-sm" onclick="Pages.transform.resetAll()">Reset all</button>
         </div>` : ''}
         <div class="tfm-layout">
           <div class="tfm-palette">
@@ -1563,18 +1597,27 @@ const Pages = {
           <div class="tfm-right">
             ${n === 0
               ? `<div class="tfm-empty">Click a step type on the left to build your pipeline</div>`
-              : steps.map((step, i) => `
-                <div class="step-card">
+              : steps.map((step, i) => {
+                  const cnt = State._stepCounts?.[i];
+                  const countHtml = cnt ? `<span class="step-count${cnt.after < cnt.before ? ' step-count-drop' : ''}">${cnt.before.toLocaleString()} → ${cnt.after.toLocaleString()}</span>` : '';
+                  const disabled = step.enabled === false;
+                  return `
+                <div class="step-card${disabled ? ' step-disabled' : ''}">
                   <div class="step-card-head">
                     <span class="step-num">${i + 1}</span>
                     <span class="step-type">${step.type}</span>
                     <span class="step-summary">${this._summary(step)}</span>
+                    ${countHtml}
                     <div class="step-actions">
+                      <button class="btn-icon" onclick="Pages.transform.moveStep(${i},-1)" title="Move up"${i===0?' disabled':''}>↑</button>
+                      <button class="btn-icon" onclick="Pages.transform.moveStep(${i},1)" title="Move down"${i===n-1?' disabled':''}>↓</button>
+                      <button class="btn btn-ghost btn-sm" onclick="Pages.transform.toggleStep(${i})">${disabled ? 'Enable' : 'Disable'}</button>
                       <button class="btn btn-ghost btn-sm" onclick="Pages.transform.openModal('${step.type}',${i})">Edit</button>
                       <button class="btn-icon" onclick="Pages.transform.removeStep(${i})" title="Remove">${I.x}</button>
                     </div>
                   </div>
-                </div>`).join('')}
+                </div>`;
+                }).join('')}
             ${n > 0 ? `
               <div>
                 <div class="section-head" style="margin-bottom:8px">
@@ -1761,11 +1804,11 @@ const Pages = {
     },
 
     _commit(type, params, editIdx) {
-      const step = { id: Date.now().toString(36), type, params };
       if (editIdx !== null && editIdx !== undefined) {
-        State.transforms[editIdx] = step;
+        const existing = State.transforms[editIdx];
+        State.transforms[editIdx] = { ...existing, type, params };
       } else {
-        State.transforms.push(step);
+        State.transforms.push({ id: Date.now().toString(36), type, params, enabled: true });
       }
       DataEngine.recompute();
       Modal.hide();
@@ -1795,6 +1838,26 @@ const Pages = {
       DataEngine.recompute();
       this.render();
       UI.toast('Step removed');
+    },
+
+    toggleStep(i) {
+      const step = State.transforms[i];
+      step.enabled = step.enabled === false;
+      DataEngine.recompute();
+      this.render();
+    },
+
+    moveStep(i, dir) {
+      const j = i + dir;
+      if (j < 0 || j >= State.transforms.length) return;
+      [State.transforms[i], State.transforms[j]] = [State.transforms[j], State.transforms[i]];
+      DataEngine.recompute();
+      this.render();
+    },
+
+    downloadCSV() {
+      DataEngine.exportCSV();
+      UI.toast('CSV downloaded');
     },
 
     resetAll() {
@@ -2352,7 +2415,10 @@ const UI = {
 
   loadCSV(text, name) {
     State.transforms = [];
+    State._stepCounts = [];
     Charts._registry = [];
+    Pages.overview._sortCol = null;
+    Pages.overview._sortDir = 1;
     const ok = DataEngine.parseCSV(text, name);
     if (!ok) { this.toast('Could not parse CSV.'); return; }
     this.navigate('overview');
