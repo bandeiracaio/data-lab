@@ -231,6 +231,37 @@ a{color:inherit;text-decoration:none}
 
 /* ── Responsive ───────────────────────────────────────────────────────────── */
 @media(max-width:900px){.theme-grid{grid-template-columns:repeat(2,1fr)}}
+
+/* ── Transform page ───────────────────────────────────────────────────────── */
+.tfm-layout{display:grid;grid-template-columns:188px 1fr;gap:16px;align-items:start}
+.tfm-palette{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:10px}
+.tfm-palette-title{font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.07em;color:var(--text-3);padding:2px 6px 8px}
+.tfm-palette-btn{display:flex;align-items:center;gap:8px;padding:7px 10px;border-radius:var(--radius);color:var(--text-2);font-size:12px;font-weight:500;transition:background var(--trans),color var(--trans);text-align:left;width:100%}
+.tfm-palette-btn:hover{background:var(--surface-2);color:var(--text)}
+.tfm-right{display:flex;flex-direction:column;gap:10px}
+.step-card{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:10px 12px}
+.step-card-head{display:flex;align-items:center;gap:8px}
+.step-num{font-size:10px;font-weight:600;color:var(--text-3);min-width:14px}
+.step-type{font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;color:var(--accent);background:var(--accent-dim);padding:2px 6px;border-radius:var(--radius);white-space:nowrap}
+.step-summary{font-size:11px;color:var(--text-2);flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-family:var(--mono)}
+.step-actions{display:flex;gap:4px;margin-left:auto;flex-shrink:0}
+.tfm-empty{display:flex;align-items:center;justify-content:center;min-height:100px;border:1px dashed var(--border);border-radius:var(--radius);color:var(--text-3);font-size:12px}
+.tfm-banner{background:var(--accent-dim);border:1px solid rgba(79,124,255,.3);border-radius:var(--radius);padding:8px 12px;font-size:12px;color:var(--accent);display:flex;align-items:center;gap:8px;margin-bottom:16px}
+
+/* ── Modal ────────────────────────────────────────────────────────────────── */
+.modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,.65);display:none;align-items:center;justify-content:center;z-index:500;backdrop-filter:blur(3px)}
+.modal-overlay.open{display:flex}
+.modal{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:24px;width:520px;max-width:90vw;max-height:82vh;overflow-y:auto}
+.modal-title{font-size:14px;font-weight:650;margin-bottom:16px}
+.modal-section{margin-bottom:14px}
+.modal-label{font-size:11px;font-weight:500;color:var(--text-2);margin-bottom:4px}
+.modal-footer{display:flex;justify-content:flex-end;gap:8px;margin-top:20px;padding-top:12px;border-top:1px solid var(--border)}
+.agg-row{display:flex;align-items:center;gap:6px;margin-bottom:5px}
+.check-row{display:flex;align-items:center;gap:7px;margin-bottom:4px;font-size:12px;color:var(--text)}
+.check-row input[type=checkbox]{accent-color:var(--accent);cursor:pointer}
+.col-hints{display:flex;gap:4px;flex-wrap:wrap;margin-top:8px}
+.col-hint{font-size:10px;background:var(--surface-2);border:1px solid var(--border);border-radius:var(--radius);padding:2px 6px;color:var(--text-2);cursor:pointer;font-family:var(--mono);transition:color var(--trans),border-color var(--trans)}
+.col-hint:hover{color:var(--accent);border-color:var(--accent)}
 </style>
 </head>
 <body>
@@ -311,6 +342,7 @@ a{color:inherit;text-decoration:none}
 
 <input type="file" id="fileInput" accept=".csv" style="display:none"/>
 <div class="toast" id="toast"></div>
+<div id="modal-overlay" class="modal-overlay"></div>
 
 <script>
 'use strict';
@@ -1216,6 +1248,9 @@ const TITANIC_CSV = `survived,pclass,sex,age,sibsp,parch,fare,embarked,class,who
 // ════════════════════════════════════════════════════════════════════════════
 const State = {
   data: null,
+  rawData: null,
+  _rawColumns: [],
+  _originalWeightCol: null,
   columns: [],
   weightCol: null,
   isCubed: false,
@@ -1295,6 +1330,9 @@ const DataEngine = {
       : rows.length;
 
     State.data = rows;
+    State.rawData = rows;
+    State._rawColumns = columns.map(c => ({...c}));
+    State._originalWeightCol = wCol;
     State.columns = columns;
     State.weightCol = wCol;
     State.isCubed = !!wCol;
@@ -1464,6 +1502,203 @@ const DataEngine = {
 
   randomSampleRows(n) {
     return this.sampleRows(n);
+  },
+
+  // ── Transform execution ────────────────────────────────────────────────────
+
+  recompute() {
+    if (!State.rawData) return;
+    const { data, columns } = this.applyTransforms(State.rawData, State._rawColumns, State.transforms);
+    State.data = data;
+    State.columns = columns;
+    const wName = State._originalWeightCol;
+    State.weightCol = (wName && columns.some(c => c.name === wName)) ? wName : null;
+    State.isCubed = !!State.weightCol;
+    State.totalRows = State.weightCol
+      ? data.reduce((s, r) => s + (r[State.weightCol] ?? 1), 0)
+      : data.length;
+  },
+
+  applyTransforms(rawData, rawColumns, steps) {
+    let data = rawData.map(r => ({...r}));
+    let columns = rawColumns.map(c => ({...c}));
+    for (const step of steps) {
+      try {
+        const res = this._tfStep(data, columns, step);
+        data = res.data; columns = res.columns;
+      } catch(e) { console.warn('Step failed:', step.type, e.message); }
+    }
+    return { data, columns };
+  },
+
+  _tfStep(data, columns, step) {
+    switch(step.type) {
+      case 'filter':  return this._tfFilter(data, columns, step.params);
+      case 'rollup':  return this._tfRollup(data, columns, step.params);
+      case 'pivot':   return this._tfPivot(data, columns, step.params);
+      case 'unpivot': return this._tfUnpivot(data, columns, step.params);
+      case 'calc':    return this._tfCalc(data, columns, step.params);
+      case 'rename':  return this._tfRename(data, columns, step.params);
+      case 'drop':    return this._tfDrop(data, columns, step.params);
+      default: return { data, columns };
+    }
+  },
+
+  _reana(data, columns) {
+    return columns.map(c => this._analyzeColumn(data, c.name, c.type === 'numeric', c.isWeight));
+  },
+
+  _tfFilter(data, columns, { col, op, value }) {
+    const meta = columns.find(c => c.name === col);
+    const isNum = meta?.type === 'numeric';
+    const v = isNum ? parseFloat(value) : value;
+    const keep = data.filter(r => {
+      const rv = r[col];
+      if (rv == null) return false;
+      switch(op) {
+        case '=':        return isNum ? rv === v : String(rv) === String(v);
+        case '!=':       return isNum ? rv !== v : String(rv) !== String(v);
+        case '<':        return rv < v;
+        case '>':        return rv > v;
+        case '>=':       return rv >= v;
+        case '<=':       return rv <= v;
+        case 'contains': return String(rv).toLowerCase().includes(String(v).toLowerCase());
+        default: return true;
+      }
+    });
+    return { data: keep, columns: this._reana(keep, columns) };
+  },
+
+  _tfRollup(data, columns, { groupBy, aggs }) {
+    const groups = new Map();
+    for (const row of data) {
+      const key = groupBy.map(c => String(row[c] ?? '')).join('\x00');
+      if (!groups.has(key)) {
+        const g = { _rows: [] };
+        for (const c of groupBy) g[c] = row[c];
+        groups.set(key, g);
+      }
+      groups.get(key)._rows.push(row);
+    }
+    const result = [];
+    for (const [, g] of groups) {
+      const row = {};
+      for (const c of groupBy) row[c] = g[c];
+      for (const { col, fn } of aggs) {
+        const vals = g._rows.map(r => r[col]).filter(v => v != null && typeof v === 'number');
+        const k = fn === 'count' ? `${col}_count` : `${col}_${fn}`;
+        if      (fn === 'count') row[k] = g._rows.length;
+        else if (fn === 'sum')   row[k] = vals.reduce((a, b) => a + b, 0);
+        else if (fn === 'mean')  row[k] = vals.length ? vals.reduce((a,b)=>a+b,0)/vals.length : null;
+        else if (fn === 'min')   row[k] = vals.length ? Math.min(...vals) : null;
+        else if (fn === 'max')   row[k] = vals.length ? Math.max(...vals) : null;
+      }
+      result.push(row);
+    }
+    const headers = result.length ? Object.keys(result[0]) : [];
+    const newCols = headers.map(h => {
+      const isNum = result.every(r => r[h] == null || typeof r[h] === 'number');
+      return this._analyzeColumn(result, h, isNum, false);
+    });
+    return { data: result, columns: newCols };
+  },
+
+  _tfPivot(data, columns, { indexCols, pivotCol, valueCol, aggFn }) {
+    const pivotVals = [...new Set(data.map(r => String(r[pivotCol] ?? '')))].sort();
+    const groups = new Map();
+    for (const row of data) {
+      const key = (indexCols || []).map(c => String(row[c] ?? '')).join('\x00');
+      if (!groups.has(key)) {
+        const g = {};
+        for (const c of (indexCols || [])) g[c] = row[c];
+        for (const pv of pivotVals) g[pv] = [];
+        groups.set(key, g);
+      }
+      const pv = String(row[pivotCol] ?? '');
+      if (row[valueCol] != null) groups.get(key)[pv].push(row[valueCol]);
+    }
+    const result = [];
+    for (const [, g] of groups) {
+      const row = {};
+      for (const c of (indexCols || [])) row[c] = g[c];
+      for (const pv of pivotVals) {
+        const vals = g[pv] || [];
+        if      (aggFn === 'sum')   row[pv] = vals.reduce((a,b)=>a+b, 0);
+        else if (aggFn === 'mean')  row[pv] = vals.length ? vals.reduce((a,b)=>a+b,0)/vals.length : null;
+        else if (aggFn === 'count') row[pv] = vals.length;
+        else if (aggFn === 'min')   row[pv] = vals.length ? Math.min(...vals) : null;
+        else if (aggFn === 'max')   row[pv] = vals.length ? Math.max(...vals) : null;
+        else                        row[pv] = vals[0] ?? null;
+      }
+      result.push(row);
+    }
+    const headers = result.length ? Object.keys(result[0]) : [];
+    const newCols = headers.map(h => {
+      const isNum = result.every(r => r[h] == null || typeof r[h] === 'number');
+      return this._analyzeColumn(result, h, isNum, false);
+    });
+    return { data: result, columns: newCols };
+  },
+
+  _tfUnpivot(data, columns, { idCols, varName, valName }) {
+    const id = idCols || [];
+    const meltCols = columns.filter(c => !id.includes(c.name)).map(c => c.name);
+    const result = [];
+    for (const row of data) {
+      for (const mc of meltCols) {
+        const newRow = {};
+        for (const ic of id) newRow[ic] = row[ic];
+        newRow[varName || 'variable'] = mc;
+        newRow[valName || 'value'] = row[mc];
+        result.push(newRow);
+      }
+    }
+    const headers = result.length ? Object.keys(result[0]) : [];
+    const newCols = headers.map(h => {
+      const isNum = result.every(r => r[h] == null || typeof r[h] === 'number');
+      return this._analyzeColumn(result, h, isNum, false);
+    });
+    return { data: result, columns: newCols };
+  },
+
+  _tfCalc(data, columns, { newCol, expression }) {
+    const colNames = columns.map(c => c.name);
+    // Map column names to safe parameter names to avoid reserved-word conflicts (e.g. "class")
+    const safeNames = colNames.map((_, i) => `_c${i}`);
+    // Replace column name references in the expression with safe names.
+    // Sort longest-first so overlapping names (e.g. "fare_per" before "fare") are replaced correctly.
+    const order = colNames.map((n, i) => i).sort((a, b) => colNames[b].length - colNames[a].length);
+    let safeExpr = expression;
+    for (const i of order) {
+      const esc = colNames[i].replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      safeExpr = safeExpr.replace(new RegExp(`\\b${esc}\\b`, 'g'), safeNames[i]);
+    }
+    let fn;
+    try { fn = new Function(...safeNames, `"use strict"; return (${safeExpr});`); }
+    catch(e) { throw new Error(`Bad expression: ${e.message}`); }
+    const result = data.map(row => {
+      const args = colNames.map(c => row[c]);
+      let val;
+      try { val = fn(...args); } catch(e) { val = null; }
+      if (val === undefined || (typeof val === 'number' && !isFinite(val))) val = null;
+      return { ...row, [newCol]: val };
+    });
+    const isNum = result.every(r => r[newCol] == null || typeof r[newCol] === 'number');
+    return { data: result, columns: [...columns, this._analyzeColumn(result, newCol, isNum, false)] };
+  },
+
+  _tfRename(data, columns, { oldName, newName }) {
+    const result = data.map(row => {
+      const r = {...row};
+      if (oldName in r) { r[newName] = r[oldName]; delete r[oldName]; }
+      return r;
+    });
+    return { data: result, columns: columns.map(c => c.name === oldName ? {...c, name: newName} : c) };
+  },
+
+  _tfDrop(data, columns, { col }) {
+    const result = data.map(row => { const r = {...row}; delete r[col]; return r; });
+    return { data: result, columns: columns.filter(c => c.name !== col) };
   },
 };
 
@@ -1679,6 +1914,32 @@ const Charts = {
       bargap:.25, showlegend:false,
     }, this._cfg());
   },
+};
+
+// ════════════════════════════════════════════════════════════════════════════
+// MODAL
+// ════════════════════════════════════════════════════════════════════════════
+const Modal = {
+  _cb: null,
+  show(title, body, onConfirm) {
+    const ov = document.getElementById('modal-overlay');
+    ov.innerHTML = `<div class="modal" onclick="event.stopPropagation()">
+      <div class="modal-title">${title}</div>
+      ${body}
+      <div class="modal-footer">
+        <button class="btn btn-ghost" onclick="Modal.hide()">Cancel</button>
+        <button class="btn btn-primary" onclick="Modal._confirm()">Apply</button>
+      </div>
+    </div>`;
+    ov.classList.add('open');
+    ov.onclick = () => this.hide();
+    this._cb = onConfirm;
+  },
+  hide() {
+    document.getElementById('modal-overlay').classList.remove('open');
+    this._cb = null;
+  },
+  _confirm() { if (this._cb) this._cb(); },
 };
 
 // ════════════════════════════════════════════════════════════════════════════
@@ -1936,13 +2197,272 @@ const Pages = {
 
   // ── Transform ─────────────────────────────────────────────────────────────
   transform: {
+    _aggIdx: 0,
+
     render() {
-      document.getElementById('page-transform').innerHTML = `
-        <div class="coming-soon">
-          <svg width="48" height="48" viewBox="0 0 48 48" fill="none"><path d="M6 12h36M12 24h24M20 36h8" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
-          <h2>Transform</h2>
-          <p>Filter, rollup, pivot, and calculated columns — coming in Phase 3.</p>
+      const el = document.getElementById('page-transform');
+      if (!State.rawData) {
+        el.innerHTML = `<div class="empty-state"><div class="empty-title">No dataset loaded</div><div class="empty-sub">Load a CSV from the Overview page first.</div></div>`;
+        return;
+      }
+      const steps = State.transforms;
+      const n = steps.length;
+      el.innerHTML = `
+        ${n > 0 ? `<div class="tfm-banner">
+          <svg width="13" height="13" viewBox="0 0 13 13" fill="none"><path d="M1.5 3.5h10M3.5 6.5h6M5.5 9.5h2" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+          ${n} step${n > 1 ? 's' : ''} active — Overview and Explore reflect derived data
+          <button class="btn btn-ghost btn-sm" style="margin-left:auto" onclick="Pages.transform.resetAll()">Reset all</button>
+        </div>` : ''}
+        <div class="tfm-layout">
+          <div class="tfm-palette">
+            <div class="tfm-palette-title">Add step</div>
+            ${[['filter','Filter rows'],['rollup','Rollup'],['pivot','Pivot'],['unpivot','Unpivot'],
+               ['calc','Calculated column'],['rename','Rename column'],['drop','Drop column']]
+              .map(([t, l]) => `<button class="tfm-palette-btn" onclick="Pages.transform.openModal('${t}',null)">${l}</button>`).join('')}
+          </div>
+          <div class="tfm-right">
+            ${n === 0
+              ? `<div class="tfm-empty">Click a step type on the left to build your pipeline</div>`
+              : steps.map((step, i) => `
+                <div class="step-card">
+                  <div class="step-card-head">
+                    <span class="step-num">${i + 1}</span>
+                    <span class="step-type">${step.type}</span>
+                    <span class="step-summary">${this._summary(step)}</span>
+                    <div class="step-actions">
+                      <button class="btn btn-ghost btn-sm" onclick="Pages.transform.openModal('${step.type}',${i})">Edit</button>
+                      <button class="btn-icon" onclick="Pages.transform.removeStep(${i})" title="Remove">${I.x}</button>
+                    </div>
+                  </div>
+                </div>`).join('')}
+            ${n > 0 ? `
+              <div>
+                <div class="section-head" style="margin-bottom:8px">
+                  <span class="section-title">Preview <span style="font-weight:400;text-transform:none;color:var(--text-3)">(${Math.min(10, State.data.length)} of ${State.data.length.toLocaleString()} rows)</span></span>
+                </div>
+                <div class="table-wrap">
+                  <table class="data-table">
+                    <thead><tr>${State.columns.map(c => `<th>${c.name}</th>`).join('')}</tr></thead>
+                    <tbody>${State.data.slice(0, 10).map(row =>
+                      `<tr>${State.columns.map(c => `<td>${Fmt.cell(row[c.name], c.name)}</td>`).join('')}</tr>`
+                    ).join('')}</tbody>
+                  </table>
+                </div>
+              </div>` : ''}
+          </div>
         </div>`;
+    },
+
+    _summary(step) {
+      const p = step.params;
+      switch(step.type) {
+        case 'filter':  return `${p.col} ${p.op} "${p.value}"`;
+        case 'rollup':  return `group by [${(p.groupBy||[]).join(', ')}] · ${(p.aggs||[]).map(a=>`${a.fn}(${a.col})`).join(', ')}`;
+        case 'pivot':   return `${p.pivotCol} → cols, ${p.valueCol} values (${p.aggFn})`;
+        case 'unpivot': return `melt → ${p.varName} / ${p.valName}`;
+        case 'calc':    return `${p.newCol} = ${p.expression}`;
+        case 'rename':  return `${p.oldName} → ${p.newName}`;
+        case 'drop':    return p.col;
+        default: return '';
+      }
+    },
+
+    _opts(selected, cols) {
+      return (cols || State.columns).map(c =>
+        `<option value="${c.name}" ${c.name === selected ? 'selected' : ''}>${c.name}</option>`
+      ).join('');
+    },
+
+    openModal(type, editIdx) {
+      const p = (editIdx !== null && editIdx !== undefined) ? State.transforms[editIdx].params : {};
+      const cols = State.columns;
+      const numCols = cols.filter(c => c.type === 'numeric' && !c.isWeight);
+      const catCols = cols.filter(c => c.type === 'categorical');
+      const g = id => document.getElementById(id);
+      let title, body, onConfirm;
+
+      if (type === 'filter') {
+        title = 'Filter rows';
+        body = `
+          <div class="modal-section"><div class="modal-label">Column</div>
+            <select class="form-select" id="tf-col" style="width:100%">${this._opts(p.col)}</select></div>
+          <div class="modal-section"><div class="modal-label">Operator</div>
+            <select class="form-select" id="tf-op" style="width:100%">
+              ${['=','!=','<','>','>=','<=','contains'].map(op=>
+                `<option value="${op}" ${p.op===op?'selected':''}>${op}</option>`).join('')}
+            </select></div>
+          <div class="modal-section"><div class="modal-label">Value</div>
+            <input class="form-input" id="tf-val" style="width:100%" value="${p.value||''}" placeholder="enter value"/></div>`;
+        onConfirm = () => {
+          const col = g('tf-col')?.value, op = g('tf-op')?.value, value = g('tf-val')?.value;
+          if (!col || !op || value === undefined || value === '') { UI.toast('Fill in all fields'); return; }
+          this._commit(type, { col, op, value }, editIdx);
+        };
+
+      } else if (type === 'rollup') {
+        this._aggIdx = 0;
+        const existGB = p.groupBy || [];
+        const existAggs = p.aggs || (numCols.length ? [{ col: numCols[0].name, fn: 'sum' }] : []);
+        title = 'Rollup';
+        body = `
+          <div class="modal-section"><div class="modal-label">Group by</div>
+            <div id="gb-checks" style="max-height:160px;overflow-y:auto">
+              ${cols.map(c => `<div class="check-row">
+                <input type="checkbox" id="gb-${c.name.replace(/\W/g,'_')}" value="${c.name}" ${existGB.includes(c.name)?'checked':''}>
+                <label for="gb-${c.name.replace(/\W/g,'_')}">${c.name}</label></div>`).join('')}
+            </div></div>
+          <div class="modal-section"><div class="modal-label">Aggregations</div>
+            <div id="agg-rows"></div>
+            <button class="btn btn-ghost btn-sm" style="margin-top:6px" onclick="Pages.transform._addAggRow()">+ Add aggregation</button>
+          </div>`;
+        onConfirm = () => {
+          const groupBy = Array.from(document.querySelectorAll('#gb-checks input:checked')).map(cb => cb.value);
+          if (!groupBy.length) { UI.toast('Select at least one group-by column'); return; }
+          const aggRows = document.querySelectorAll('.agg-row');
+          const aggs = Array.from(aggRows).map(row => {
+            const idx = row.dataset.idx;
+            return { col: g(`agg-col-${idx}`)?.value, fn: g(`agg-fn-${idx}`)?.value };
+          }).filter(a => a.col && a.fn);
+          if (!aggs.length) { UI.toast('Add at least one aggregation'); return; }
+          this._commit(type, { groupBy, aggs }, editIdx);
+        };
+        setTimeout(() => existAggs.forEach(a => this._addAggRow(a.col, a.fn)), 0);
+
+      } else if (type === 'pivot') {
+        title = 'Pivot';
+        body = `
+          <div class="modal-section"><div class="modal-label">Index columns (kept as rows)</div>
+            <div style="max-height:140px;overflow-y:auto">
+              ${cols.map(c => `<div class="check-row">
+                <input type="checkbox" id="idx-${c.name.replace(/\W/g,'_')}" value="${c.name}" ${(p.indexCols||[]).includes(c.name)?'checked':''}>
+                <label for="idx-${c.name.replace(/\W/g,'_')}">${c.name}</label></div>`).join('')}
+            </div></div>
+          <div class="modal-section"><div class="modal-label">Pivot column (values become headers)</div>
+            <select class="form-select" id="tf-pivcol" style="width:100%">${this._opts(p.pivotCol)}</select></div>
+          <div class="modal-section"><div class="modal-label">Value column</div>
+            <select class="form-select" id="tf-valcol" style="width:100%">${this._opts(p.valueCol, numCols)}</select></div>
+          <div class="modal-section"><div class="modal-label">Aggregation</div>
+            <select class="form-select" id="tf-aggfn" style="width:100%">
+              ${['sum','mean','count','min','max','first'].map(f=>
+                `<option value="${f}" ${p.aggFn===f?'selected':''}>${f}</option>`).join('')}
+            </select></div>`;
+        onConfirm = () => {
+          const indexCols = Array.from(document.querySelectorAll('.modal input[type=checkbox]:checked')).map(cb => cb.value);
+          const pivotCol = g('tf-pivcol')?.value, valueCol = g('tf-valcol')?.value, aggFn = g('tf-aggfn')?.value;
+          if (!pivotCol || !valueCol) { UI.toast('Select pivot and value columns'); return; }
+          this._commit(type, { indexCols, pivotCol, valueCol, aggFn }, editIdx);
+        };
+
+      } else if (type === 'unpivot') {
+        title = 'Unpivot (Melt)';
+        body = `
+          <div class="modal-section"><div class="modal-label">ID columns (kept as-is)</div>
+            <div style="max-height:160px;overflow-y:auto">
+              ${cols.map(c => `<div class="check-row">
+                <input type="checkbox" id="id-${c.name.replace(/\W/g,'_')}" value="${c.name}" ${(p.idCols||[]).includes(c.name)?'checked':''}>
+                <label for="id-${c.name.replace(/\W/g,'_')}">${c.name}</label></div>`).join('')}
+            </div></div>
+          <div class="modal-section"><div class="modal-label">Variable column name</div>
+            <input class="form-input" id="tf-varname" style="width:100%" value="${p.varName||'variable'}"/></div>
+          <div class="modal-section"><div class="modal-label">Value column name</div>
+            <input class="form-input" id="tf-valname" style="width:100%" value="${p.valName||'value'}"/></div>`;
+        onConfirm = () => {
+          const idCols = Array.from(document.querySelectorAll('.modal input[type=checkbox]:checked')).map(cb => cb.value);
+          const varName = g('tf-varname')?.value?.trim() || 'variable';
+          const valName = g('tf-valname')?.value?.trim() || 'value';
+          this._commit(type, { idCols, varName, valName }, editIdx);
+        };
+
+      } else if (type === 'calc') {
+        title = 'Calculated column';
+        body = `
+          <div class="modal-section"><div class="modal-label">New column name</div>
+            <input class="form-input" id="tf-newcol" style="width:100%" value="${p.newCol||''}" placeholder="my_column"/></div>
+          <div class="modal-section"><div class="modal-label">Expression (column names are variables)</div>
+            <input class="form-input" id="tf-expr" style="width:100%;font-family:var(--mono)" value="${(p.expression||'').replace(/"/g,'&quot;')}" placeholder="col_a / col_b * 100"/>
+            <div class="col-hints">
+              ${cols.map(c=>`<span class="col-hint" onclick="(()=>{const el=document.getElementById('tf-expr');el.value=(el.value+' ${c.name}').trim()})()">${c.name}</span>`).join('')}
+            </div></div>`;
+        onConfirm = () => {
+          const newCol = g('tf-newcol')?.value?.trim();
+          const expression = g('tf-expr')?.value?.trim();
+          if (!newCol) { UI.toast('Enter a column name'); return; }
+          if (!expression) { UI.toast('Enter an expression'); return; }
+          this._commit(type, { newCol, expression }, editIdx);
+        };
+
+      } else if (type === 'rename') {
+        title = 'Rename column';
+        body = `
+          <div class="modal-section"><div class="modal-label">Column to rename</div>
+            <select class="form-select" id="tf-oldname" style="width:100%">${this._opts(p.oldName)}</select></div>
+          <div class="modal-section"><div class="modal-label">New name</div>
+            <input class="form-input" id="tf-newname" style="width:100%" value="${p.newName||''}" placeholder="new_name"/></div>`;
+        onConfirm = () => {
+          const oldName = g('tf-oldname')?.value, newName = g('tf-newname')?.value?.trim();
+          if (!oldName || !newName) { UI.toast('Fill in both fields'); return; }
+          if (oldName === newName) { UI.toast('Names are the same'); return; }
+          this._commit(type, { oldName, newName }, editIdx);
+        };
+
+      } else if (type === 'drop') {
+        title = 'Drop column';
+        body = `
+          <div class="modal-section"><div class="modal-label">Column to remove</div>
+            <select class="form-select" id="tf-dropcol" style="width:100%">${this._opts(p.col)}</select></div>`;
+        onConfirm = () => {
+          const col = g('tf-dropcol')?.value;
+          if (!col) return;
+          this._commit(type, { col }, editIdx);
+        };
+      }
+
+      Modal.show(title, body, onConfirm);
+    },
+
+    _commit(type, params, editIdx) {
+      const step = { id: Date.now().toString(36), type, params };
+      if (editIdx !== null && editIdx !== undefined) {
+        State.transforms[editIdx] = step;
+      } else {
+        State.transforms.push(step);
+      }
+      DataEngine.recompute();
+      Modal.hide();
+      this.render();
+      UI.toast((editIdx !== null && editIdx !== undefined) ? 'Step updated' : 'Step added');
+    },
+
+    _addAggRow(col, fn) {
+      const i = this._aggIdx++;
+      const numCols = State.columns.filter(c => c.type === 'numeric' && !c.isWeight);
+      const row = document.createElement('div');
+      row.className = 'agg-row'; row.dataset.idx = i;
+      row.innerHTML = `
+        <select class="form-select" id="agg-col-${i}" style="flex:1">
+          ${numCols.map(c=>`<option value="${c.name}" ${c.name===col?'selected':''}>${c.name}</option>`).join('')}
+        </select>
+        <select class="form-select" id="agg-fn-${i}" style="width:85px">
+          ${['sum','mean','count','min','max'].map(f=>`<option value="${f}" ${f===fn?'selected':''}>${f}</option>`).join('')}
+        </select>
+        <button class="btn-icon" onclick="this.closest('.agg-row').remove()" title="Remove">${I.x}</button>`;
+      const container = document.getElementById('agg-rows');
+      if (container) container.appendChild(row);
+    },
+
+    removeStep(i) {
+      State.transforms.splice(i, 1);
+      DataEngine.recompute();
+      this.render();
+      UI.toast('Step removed');
+    },
+
+    resetAll() {
+      if (!confirm('Remove all transform steps?')) return;
+      State.transforms = [];
+      DataEngine.recompute();
+      this.render();
+      UI.toast('All transforms cleared');
     },
   },
 
@@ -2054,6 +2574,7 @@ const Themes = {
     const p = State.currentPage;
     if (p === 'explore')       setTimeout(() => Pages.explore.render(), 50);
     if (p === 'column-detail') setTimeout(() => Pages.columnDetail.render(), 50);
+    if (p === 'transform')     setTimeout(() => Pages.transform.render(), 50);
   },
 };
 
@@ -2097,6 +2618,7 @@ const UI = {
   },
 
   loadCSV(text, name) {
+    State.transforms = [];
     const ok = DataEngine.parseCSV(text, name);
     if (!ok) { this.toast('Could not parse CSV.'); return; }
     this.navigate('overview');
