@@ -146,8 +146,12 @@ a{color:inherit;text-decoration:none}
 .col-name-btn{color:var(--text);font-weight:550;font-size:11px;padding:0;transition:color var(--trans)}
 .col-name-btn:hover{color:var(--accent)}
 .col-del{opacity:0;padding:2px;border-radius:2px;color:var(--text-3);transition:opacity var(--trans),color var(--trans),background var(--trans);line-height:1;display:flex;align-items:center}
-.data-table th:hover .col-del{opacity:1}
+.data-table th:hover .col-del,.data-table th:hover .col-sort{opacity:1}
 .col-del:hover{color:var(--danger);background:rgba(255,95,95,.12)}
+.col-sort{opacity:0;padding:2px;border-radius:2px;color:var(--text-3);font-size:10px;transition:opacity var(--trans),color var(--trans);line-height:1}
+.col-sort:hover{color:var(--accent)}
+.sort-active .col-sort{opacity:1;color:var(--accent)}
+.sort-active{background:var(--surface)}
 .data-table td{padding:6px 12px;border-bottom:1px solid var(--border);color:var(--text);font-variant-numeric:tabular-nums}
 .data-table tr:last-child td{border-bottom:none}
 .data-table tr:hover td{background:var(--surface-2)}
@@ -1108,6 +1112,30 @@ const Charts = {
     }), this._cfg());
   },
 
+  pairplot(id, rows, numCols, groupCol) {
+    const accent = this._css('--accent');
+    const dims = numCols.map(c => ({ label:c, values:rows.map(r=>r[c]) }));
+    let marker = { size:3, opacity:0.55, color:accent };
+    if (groupCol) {
+      const cats = [...new Set(rows.map(r=>r[groupCol]).filter(v=>v!=null))];
+      const palette = this._catPalette(cats.length);
+      const colorMap = Object.fromEntries(cats.map((c,i)=>[c,palette[i]]));
+      marker = { size:3, opacity:0.6, color:rows.map(r=>colorMap[r[groupCol]]??accent) };
+    }
+    const h = Math.max(380, numCols.length * 160);
+    Plotly.newPlot(id, [{
+      type:'splom', dimensions:dims, marker,
+      diagonal:{ visible:true },
+      showupperhalf:false,
+      text: groupCol ? rows.map(r=>String(r[groupCol]??'')) : undefined,
+      hovertemplate: groupCol ? '%{xaxis.title.text}: %{x}<br>%{yaxis.title.text}: %{y}<br>'+groupCol+': %{text}<extra></extra>' : undefined,
+    }], this._layout({
+      height:h,
+      legend:{ font:{size:10,color:this._css('--text-2')} },
+      margin:{ t:20, r:20, b:60, l:60 },
+    }), this._cfg());
+  },
+
   _registry: [],
   _register(title, divId) {
     const el = document.getElementById(divId);
@@ -1154,6 +1182,44 @@ const Pages = {
 
   // ── Overview ──────────────────────────────────────────────────────────────
   overview: {
+    _sortCol: null,
+    _sortDir: 1,
+    sortBy(col) {
+      if (this._sortCol === col) this._sortDir *= -1;
+      else { this._sortCol = col; this._sortDir = 1; }
+      this._renderTable();
+    },
+    _getSample() {
+      if (!this._sortCol) return DataEngine.randomSampleRows(State.settings.tableRows);
+      const d = this._sortDir, c = this._sortCol;
+      return [...State.data].sort((a, b) => {
+        const av = a[c], bv = b[c];
+        if (av == null && bv == null) return 0;
+        if (av == null) return 1;
+        if (bv == null) return -1;
+        return (av < bv ? -1 : av > bv ? 1 : 0) * d;
+      }).slice(0, State.settings.tableRows);
+    },
+    _renderTable() {
+      const columns = State.columns;
+      const sample  = this._getSample();
+      const sc = this._sortCol, sd = this._sortDir;
+      const tableEl = document.getElementById('ov-table-wrap');
+      if (!tableEl) return;
+      tableEl.innerHTML = `<table class="data-table">
+        <thead><tr>${columns.map(col => {
+          const active = col.name === sc;
+          const arrow  = active ? (sd === 1 ? ' ▲' : ' ▼') : '';
+          return `<th class="${active?'sort-active':''}"><div class="th-inner">
+            <button class="col-name-btn" onclick="UI.openColumnDetail('${col.name}')">${col.name}</button>
+            ${col.isWeight ? `<span class="badge badge-cube" style="font-size:8px;padding:1px 4px">W</span>` : ''}
+            <button class="col-sort btn-icon" onclick="Pages.overview.sortBy('${col.name}')" title="Sort">${active?(sd===1?'▲':'▼'):'⇅'}</button>
+            <button class="col-del btn-icon" onclick="Pages.overview.deleteColumn('${col.name}')" title="Remove">${I.x}</button>
+          </div></th>`;
+        }).join('')}</tr></thead>
+        <tbody>${sample.map(row => `<tr>${columns.map(col => `<td>${Fmt.cell(row[col.name], col.name)}</td>`).join('')}</tr>`).join('')}</tbody>
+      </table>`;
+    },
     render() {
       const el = document.getElementById('page-overview');
       if (!State.data) {
@@ -1175,7 +1241,7 @@ const Pages = {
       const { columns, fileName, totalRows, isCubed, weightCol, data } = State;
       const numCols = columns.filter(c => c.type==='numeric' && !c.isWeight);
       const catCols = columns.filter(c => c.type==='categorical');
-      const sample  = DataEngine.randomSampleRows(State.settings.tableRows);
+      const sample  = this._getSample();
 
       el.innerHTML = `
         <div class="dataset-header">
@@ -1223,24 +1289,21 @@ const Pages = {
         </div>
 
         <div class="section-head" style="margin-top:4px">
-          <span class="section-title">Sample data <span style="font-weight:400;text-transform:none;font-size:11px;color:var(--text-3)">(${sample.length} of ${data.length} rows)</span></span>
-          <button class="btn btn-ghost btn-sm" onclick="Pages.overview.resample()">${I.resample} Resample</button>
+          <span class="section-title">Sample data <span style="font-weight:400;text-transform:none;font-size:11px;color:var(--text-3)">(${sample.length} of ${data.length} rows${this._sortCol?` sorted by ${this._sortCol}`:''})</span></span>
+          <div style="display:flex;gap:6px">
+            ${this._sortCol ? `<button class="btn btn-ghost btn-sm" onclick="Pages.overview._sortCol=null;Pages.overview._renderTable()">Clear sort</button>` : ''}
+            <button class="btn btn-ghost btn-sm" onclick="Pages.overview.resample()">${I.resample} Resample</button>
+          </div>
         </div>
-        <div class="table-wrap">
-          <table class="data-table">
-            <thead><tr>${columns.map(col => `
-              <th><div class="th-inner">
-                <button class="col-name-btn" onclick="UI.openColumnDetail('${col.name}')">${col.name}</button>
-                ${col.isWeight ? `<span class="badge badge-cube" style="font-size:8px;padding:1px 4px">W</span>` : ''}
-                <button class="col-del btn-icon" onclick="Pages.overview.deleteColumn('${col.name}')" title="Remove">${I.x}</button>
-              </div></th>`).join('')}
-            </tr></thead>
-            <tbody>${sample.map(row => `<tr>${columns.map(col => `<td>${Fmt.cell(row[col.name], col.name)}</td>`).join('')}</tr>`).join('')}</tbody>
-          </table>
-        </div>
+        <div class="table-wrap" id="ov-table-wrap"></div>
       `;
+      this._renderTable();
     },
-    resample() { this.render(); },
+    resample() {
+      this._sortCol = null;
+      this._sortDir = 1;
+      this.render();
+    },
     deleteColumn(col) {
       if (!confirm(`Remove column "${col}"?`)) return;
       State.data = State.data.map(r => { const o={...r}; delete o[col]; return o; });
@@ -1377,6 +1440,22 @@ const Pages = {
           <div id="chart-scatter" style="height:320px"></div>
         </div>` : ''}
 
+        ${numCols.length >= 2 ? `
+        <div class="section-head">
+          <span class="section-title">Pairplot</span>
+          <span style="font-size:11px;color:var(--text-3)">${Math.min(State.settings.sampleSize,State.data.length).toLocaleString()} rows sampled</span>
+        </div>
+        <div class="card" style="margin-bottom:24px">
+          <div style="display:flex;align-items:center;gap:12px;margin-bottom:10px;flex-wrap:wrap">
+            <span style="font-size:12px;color:var(--text-2)">Color by</span>
+            <select class="form-select" id="ppColor" style="width:150px" onchange="Pages.explore.renderPairplot()">
+              <option value="">— none —</option>
+              ${catCols.map(c=>`<option value="${c.name}">${c.name}</option>`).join('')}
+            </select>
+          </div>
+          <div id="chart-pairplot"></div>
+        </div>` : ''}
+
         ${numCols.length && catCols.length ? `
         <div class="section-head">
           <span class="section-title">Breakdown</span>
@@ -1416,6 +1495,7 @@ const Pages = {
           Charts._register('Correlation matrix', 'chart-heatmap');
           this.renderScatter();
         }
+        if (numCols.length >= 2) this.renderPairplot();
         if (numCols.length && catCols.length) this.renderBreakdown();
       });
     },
@@ -1429,6 +1509,15 @@ const Pages = {
       const rows = DataEngine.sampleRows(State.settings.sampleSize);
       Charts.scatter('chart-scatter', rows, xEl.value, yEl.value, cEl?.value||null, this._scatterMode||'sample');
       Charts._register(`${xEl.value} vs ${yEl.value}`, 'chart-scatter');
+    },
+    renderPairplot() {
+      const numCols = State.columns.filter(c => c.type==='numeric' && !c.isWeight).map(c=>c.name);
+      if (numCols.length < 2) return;
+      const groupEl = document.getElementById('ppColor');
+      const groupCol = groupEl?.value || null;
+      const rows = DataEngine.sampleRows(State.settings.sampleSize);
+      Charts.pairplot('chart-pairplot', rows, numCols, groupCol || null);
+      Charts._register(`Pairplot${groupCol?' by '+groupCol:''}`, 'chart-pairplot');
     },
     renderBreakdown() {
       const numEl = document.getElementById('brkNum');
@@ -2238,8 +2327,8 @@ const UI = {
     this.loadTitanic();
   },
 
-  navigate(page) {
-    State.prevPage    = State.currentPage;
+  navigate(page, prevOverride) {
+    State.prevPage    = prevOverride ?? State.currentPage;
     State.currentPage = page;
     document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
     const pid = page === 'column-detail' ? 'page-column-detail' : `page-${page}`;
@@ -2258,8 +2347,7 @@ const UI = {
 
   openColumnDetail(col, from) {
     State.columnDetail = col;
-    State.prevPage = from || State.currentPage;
-    this.navigate('column-detail');
+    this.navigate('column-detail', from || State.currentPage);
   },
 
   loadCSV(text, name) {
@@ -2272,6 +2360,7 @@ const UI = {
   },
 
   loadTitanic() {
+    if (State.transforms.length && !confirm(`Loading a new dataset will clear ${State.transforms.length} active transform step${State.transforms.length>1?'s':''}. Continue?`)) return;
     fetch('./titanic.csv')
       .then(r => { if (!r.ok) throw new Error(r.status); return r.text(); })
       .then(text => { this.loadCSV(text, 'titanic'); this.navigate('overview'); })
@@ -2283,10 +2372,11 @@ const UI = {
   _setupFileInput() {
     document.getElementById('fileInput').addEventListener('change', e => {
       const f = e.target.files[0]; if (!f) return;
+      e.target.value = '';
+      if (State.transforms.length && !confirm(`Loading a new dataset will clear ${State.transforms.length} active transform step${State.transforms.length>1?'s':''}. Continue?`)) return;
       const r = new FileReader();
       r.onload = ev => this.loadCSV(ev.target.result, f.name.replace(/\.csv$/i,''));
       r.readAsText(f);
-      e.target.value = '';
     });
   },
 
@@ -2312,6 +2402,7 @@ const UI = {
       e.preventDefault(); depth=0; ov.classList.remove('active');
       const f = e.dataTransfer.files[0];
       if (!f || !f.name.match(/\.csv$/i)) { this.toast('Drop a .csv file.'); return; }
+      if (State.transforms.length && !confirm(`Loading a new dataset will clear ${State.transforms.length} active transform step${State.transforms.length>1?'s':''}. Continue?`)) return;
       const r = new FileReader();
       r.onload = ev => this.loadCSV(ev.target.result, f.name.replace(/\.csv$/i,''));
       r.readAsText(f);
