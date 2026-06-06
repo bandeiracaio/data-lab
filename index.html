@@ -225,12 +225,47 @@ a{color:inherit;text-decoration:none}
 ::-webkit-scrollbar-thumb:hover{background:var(--text-3)}
 
 /* ── Placeholder pages ────────────────────────────────────────────────────── */
+.placeholder-msg{color:var(--text-3);font-size:13px;padding:32px 0;text-align:center}
 .coming-soon{display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:60vh;gap:12px;color:var(--text-3);text-align:center}
 .coming-soon h2{font-size:15px;font-weight:600;color:var(--text-2)}
 .coming-soon p{font-size:13px;max-width:360px}
 
+/* ── Dashboard page ───────────────────────────────────────────────────────── */
+.dash-list{display:flex;flex-direction:column;gap:8px}
+.dash-list-item{display:flex;align-items:center;gap:12px;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:12px 16px}
+.dash-list-name{font-size:13px;font-weight:600}
+.dash-list-meta{font-size:11px;color:var(--text-3);margin-top:2px}
+.dash-list-actions{margin-left:auto;display:flex;gap:6px;flex-shrink:0}
+.dash-editor-header{display:flex;align-items:center;gap:12px;margin-bottom:16px;padding-bottom:14px;border-bottom:1px solid var(--border)}
+.dash-name-input{background:transparent;border:none;border-bottom:1px solid var(--border);border-radius:0;padding:4px 0;font-size:16px;font-weight:600;color:var(--text);flex:1;min-width:0;transition:border-color var(--trans)}
+.dash-name-input:focus{outline:none;border-color:var(--accent)}
+.dash-add-bar{display:flex;align-items:center;gap:6px;margin-bottom:16px;padding:8px 12px;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius)}
+.dash-grid{display:flex;flex-wrap:wrap;gap:12px;align-items:start}
+.dash-block{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:14px;min-width:0;transition:box-shadow var(--trans),border-color var(--trans)}
+.dash-block[data-width="full"]{flex:0 0 100%}
+.dash-block[data-width="half"]{flex:0 0 calc(50% - 6px)}
+.dash-block[data-width="third"]{flex:0 0 calc(33.33% - 8px)}
+.dash-block.dragging{opacity:.4}
+.dash-block.drag-over{border-color:var(--accent);box-shadow:0 0 0 2px var(--accent-dim)}
+.dash-block-header{display:flex;align-items:center;gap:8px;margin-bottom:10px}
+.dash-drag-handle{color:var(--text-3);cursor:grab;font-size:14px;flex-shrink:0;line-height:1;user-select:none}
+.dash-drag-handle:active{cursor:grabbing}
+.dash-block-title{font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.07em;color:var(--text-2);flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.dash-block-actions{display:flex;align-items:center;gap:4px;margin-left:auto;flex-shrink:0}
+.dash-kpi{padding:4px 0}
+.dash-kpi-label{font-size:11px;color:var(--text-2);margin-bottom:4px}
+.dash-kpi-value{font-size:30px;font-weight:700;color:var(--accent);font-variant-numeric:tabular-nums;line-height:1.1}
+.dash-kpi-sub{font-size:11px;color:var(--text-3);margin-top:5px}
+.dash-text{font-size:13px;line-height:1.7;color:var(--text)}
+.dash-text h1{font-size:18px;font-weight:700;margin-bottom:8px}
+.dash-text h2{font-size:15px;font-weight:600;margin-bottom:6px}
+.dash-text h3{font-size:13px;font-weight:600;margin-bottom:4px}
+.dash-text ul{padding-left:18px}
+.dash-text li{margin-bottom:2px}
+
 /* ── Responsive ───────────────────────────────────────────────────────────── */
-@media(max-width:900px){.theme-grid{grid-template-columns:repeat(2,1fr)}}
+@media(max-width:900px){.theme-grid{grid-template-columns:repeat(2,1fr)}
+  .dash-block[data-width="half"],.dash-block[data-width="third"]{flex:0 0 100%}}
 
 /* ── Transform page ───────────────────────────────────────────────────────── */
 .tfm-layout{display:grid;grid-template-columns:188px 1fr;gap:16px;align-items:start}
@@ -1728,6 +1763,12 @@ const Fmt = {
     if (nullPct < 50) return '#f97316';
     return 'var(--danger)';
   },
+  num(v) { return this.number(v); },
+  escHtml(s) {
+    return String(s??'')
+      .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+      .replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+  },
 };
 
 // ════════════════════════════════════════════════════════════════════════════
@@ -1914,6 +1955,17 @@ const Charts = {
       bargap:.25, showlegend:false,
     }, this._cfg());
   },
+
+  _registry: [],
+  _register(title, divId) {
+    const el = document.getElementById(divId);
+    if (!el || !el.data) return;
+    const id = `chart_${Date.now()}_${Math.random().toString(36).slice(2,6)}`;
+    const existing = this._registry.findIndex(c => c.title === title);
+    const entry = { id, title, traces: JSON.parse(JSON.stringify(el.data)), layout: JSON.parse(JSON.stringify(el.layout || {})) };
+    if (existing >= 0) this._registry[existing] = entry;
+    else this._registry.push(entry);
+  },
 };
 
 // ════════════════════════════════════════════════════════════════════════════
@@ -1939,7 +1991,7 @@ const Modal = {
     document.getElementById('modal-overlay').classList.remove('open');
     this._cb = null;
   },
-  _confirm() { if (this._cb) this._cb(); },
+  _confirm() { if (this._cb) { const cb = this._cb; this.hide(); cb(); } },
 };
 
 // ════════════════════════════════════════════════════════════════════════════
@@ -2089,6 +2141,7 @@ const Pages = {
       requestAnimationFrame(() => {
         if (stats.type === 'numeric') {
           Charts.histogram('cd-dist', State.data, col);
+          Charts._register(`Distribution: ${col}`, 'cd-dist');
           if (numCols.length) {
             const pairs = numCols
               .map(c => [c.name, DataEngine.pearsonR(State.data, col, c.name)])
@@ -2098,6 +2151,7 @@ const Pages = {
         } else {
           const top20 = stats.valueCounts.slice(0,20);
           Charts.barH('cd-dist', top20.map(([v])=>v), top20.map(([,c])=>c), null, null);
+          Charts._register(`Value counts: ${col}`, 'cd-dist');
         }
       });
     },
@@ -2180,6 +2234,7 @@ const Pages = {
         if (numCols.length > 1) {
           const mat = DataEngine.correlationMatrix(numCols.map(c=>c.name));
           Charts.heatmap('chart-heatmap', mat, numCols.map(c=>c.name));
+          Charts._register('Correlation matrix', 'chart-heatmap');
           this.renderScatter();
         }
       });
@@ -2192,6 +2247,7 @@ const Pages = {
       if (!xEl || !yEl) return;
       const rows = DataEngine.sampleRows(State.settings.sampleSize);
       Charts.scatter('chart-scatter', rows, xEl.value, yEl.value, cEl?.value||null, this._scatterMode||'sample');
+      Charts._register(`${xEl.value} vs ${yEl.value}`, 'chart-scatter');
     },
   },
 
@@ -2468,13 +2524,407 @@ const Pages = {
 
   // ── Dashboard ─────────────────────────────────────────────────────────────
   dashboard: {
+    _view: 'list',
+    _id: null,
+
     render() {
+      if (this._view === 'editor' && this._id && State.dashboards[this._id]) this._renderEditor();
+      else this._renderList();
+    },
+
+    // ── List ────────────────────────────────────────────────────────────────
+    _renderList() {
+      const ids = Object.keys(State.dashboards);
       document.getElementById('page-dashboard').innerHTML = `
-        <div class="coming-soon">
-          <svg width="48" height="48" viewBox="0 0 48 48" fill="none"><rect x="4" y="4" width="40" height="28" rx="2" stroke="currentColor" stroke-width="2"/><line x1="24" y1="32" x2="24" y2="44" stroke="currentColor" stroke-width="2"/><line x1="16" y1="44" x2="32" y2="44" stroke="currentColor" stroke-width="2"/></svg>
-          <h2>Dashboard</h2>
-          <p>Drag-and-drop dashboard builder with standalone HTML export — coming in Phase 4.</p>
+        <div class="section-header" style="margin-bottom:16px">
+          <span>Dashboards</span>
+          <button class="btn btn-primary btn-sm" onclick="Pages.dashboard._new()">+ New dashboard</button>
+        </div>
+        ${!ids.length
+          ? `<div class="placeholder-msg">No dashboards yet — create one to get started.</div>`
+          : `<div class="dash-list">${ids.map(id => {
+              const d = State.dashboards[id];
+              return `<div class="dash-list-item">
+                <div>
+                  <div class="dash-list-name">${Fmt.escHtml(d.name)}</div>
+                  <div class="dash-list-meta">${d.blocks.length} block${d.blocks.length!==1?'s':''} &mdash; ${new Date(d.modified).toLocaleDateString()}</div>
+                </div>
+                <div class="dash-list-actions">
+                  <button class="btn btn-sm btn-ghost" onclick="Pages.dashboard._open('${id}')">Open</button>
+                  <button class="btn btn-sm btn-ghost" onclick="Pages.dashboard._export('${id}')">Export</button>
+                  <button class="btn btn-sm btn-ghost" style="color:var(--danger)" onclick="Pages.dashboard._delete('${id}')">Delete</button>
+                </div>
+              </div>`;
+            }).join('')}</div>`}`;
+    },
+
+    _new() {
+      const id = `dash_${Date.now()}`;
+      State.dashboards[id] = { id, name:`Dashboard ${Object.keys(State.dashboards).length+1}`, created:Date.now(), modified:Date.now(), blocks:[] };
+      Storage.save();
+      this._open(id);
+    },
+
+    _delete(id) {
+      if (!confirm(`Delete "${State.dashboards[id]?.name}"?`)) return;
+      delete State.dashboards[id];
+      Storage.save();
+      this.render();
+    },
+
+    _open(id) { this._view='editor'; this._id=id; this.render(); },
+    _back()    { this._view='list';  this._id=null; this.render(); },
+
+    // ── Editor ──────────────────────────────────────────────────────────────
+    _renderEditor() {
+      const d = State.dashboards[this._id];
+      document.getElementById('page-dashboard').innerHTML = `
+        <div class="dash-editor-header">
+          <button class="btn btn-ghost btn-sm" onclick="Pages.dashboard._back()">Back</button>
+          <input class="dash-name-input" id="dash-name-inp" value="${Fmt.escHtml(d.name)}"
+                 oninput="Pages.dashboard._rename(this.value)" placeholder="Dashboard name">
+          <div style="display:flex;gap:6px;flex-shrink:0">
+            <button class="btn btn-ghost btn-sm" onclick="Pages.dashboard._addBlock()">+ Add block</button>
+            <button class="btn btn-primary btn-sm" onclick="Pages.dashboard._export('${this._id}')">Export HTML</button>
+          </div>
+        </div>
+        <div class="dash-grid" id="dash-grid">
+          ${d.blocks.map(b => this._blockHtml(b)).join('')}
+          ${!d.blocks.length ? `<div class="placeholder-msg" style="width:100%">No blocks yet — click "+ Add block" to start.</div>` : ''}
         </div>`;
+      requestAnimationFrame(() => {
+        d.blocks.forEach(b => { if (b.type==='plot') this._renderPlotBlock(b); });
+        this._initDnD();
+      });
+    },
+
+    _blockHtml(b) {
+      const wOpts = ['full','half','third'].map(w =>
+        `<option value="${w}"${b.width===w?' selected':''}>${w}</option>`).join('');
+      const header = `<div class="dash-block-header">
+        <span class="dash-drag-handle" title="Drag to reorder">&#x2630;</span>
+        <span class="dash-block-title">${Fmt.escHtml(b.title||b.type)}</span>
+        <div class="dash-block-actions">
+          <select style="font-size:11px;padding:2px 4px;background:var(--bg);border:1px solid var(--border);border-radius:var(--radius);color:var(--text)"
+                  onchange="Pages.dashboard._setWidth('${b.id}',this.value)">${wOpts}</select>
+          <button class="btn btn-ghost" style="font-size:10px;padding:2px 7px" onclick="Pages.dashboard._editBlock('${b.id}')">Edit</button>
+          <button class="btn btn-ghost" style="font-size:10px;padding:2px 7px;color:var(--danger)" onclick="Pages.dashboard._removeBlock('${b.id}')">X</button>
+        </div>
+      </div>`;
+      let body = '';
+      if (b.type==='plot') {
+        body = `<div id="db-plot-${b.id}" style="min-height:200px"></div>`;
+      } else if (b.type==='kpi') {
+        const val = this._calcKpi(b);
+        body = `<div class="dash-kpi">
+          <div class="dash-kpi-label">${Fmt.escHtml(b.label||b.col||'KPI')}</div>
+          <div class="dash-kpi-value">${val}</div>
+          <div class="dash-kpi-sub">${Fmt.escHtml(b.col||'')} &mdash; ${b.fn||'count'}</div>
+        </div>`;
+      } else if (b.type==='table') {
+        body = this._tableHtml(b);
+      } else if (b.type==='text') {
+        body = `<div class="dash-text">${this._md(b.content||'')}</div>`;
+      }
+      return `<div class="dash-block" data-width="${b.width||'full'}" data-id="${b.id}" draggable="true">${header}${body}</div>`;
+    },
+
+    _renderPlotBlock(b) {
+      const entry = Charts._registry.find(c => c.id===b.chartId);
+      const el = document.getElementById(`db-plot-${b.id}`);
+      if (!el) return;
+      if (!entry) {
+        el.innerHTML = `<div style="padding:24px;color:var(--text-3);font-size:12px">Chart not in registry — visit Explore or Column Detail to regenerate it.</div>`;
+        return;
+      }
+      Plotly.newPlot(el, JSON.parse(JSON.stringify(entry.traces)), JSON.parse(JSON.stringify(entry.layout||{})), { displayModeBar:false, responsive:true });
+    },
+
+    _calcKpi(b) {
+      if (!State.data || !b.col) return '—';
+      const fn = b.fn||'mean';
+      if (fn==='count') return Fmt.num(State.totalRows);
+      const rows = State.data;
+      const col  = b.col;
+      const vals = rows.map(r=>r[col]).filter(v=>v!=null && typeof v==='number');
+      if (!vals.length) return '—';
+      if (fn==='mean') { const m = DataEngine.weightedMean(rows, col); return m!=null ? Fmt.num(m) : '—'; }
+      if (fn==='sum')  {
+        const tw = DataEngine.totalWeight(rows);
+        const wm = DataEngine.weightedMean(rows, col);
+        return (tw!=null && wm!=null) ? Fmt.num(tw*wm) : '—';
+      }
+      if (fn==='min') return Fmt.num(Math.min(...vals));
+      if (fn==='max') return Fmt.num(Math.max(...vals));
+      return '—';
+    },
+
+    _tableHtml(b) {
+      if (!State.data) return '<div style="color:var(--text-3);font-size:12px">No data loaded</div>';
+      const cols = (b.cols&&b.cols.length) ? b.cols : State.columns.slice(0,5).map(c=>c.name);
+      const rows = State.data.slice(0, b.limit||10);
+      return `<div style="overflow-x:auto"><table class="data-table" style="font-size:11px">
+        <thead><tr>${cols.map(c=>`<th>${Fmt.escHtml(c)}</th>`).join('')}</tr></thead>
+        <tbody>${rows.map(r=>`<tr>${cols.map(c=>`<td>${Fmt.escHtml(String(r[c]??''))}</td>`).join('')}</tr>`).join('')}</tbody>
+      </table></div>`;
+    },
+
+    _md(src) {
+      return src
+        .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+        .replace(/^### (.+)$/gm,'<h3>$1</h3>')
+        .replace(/^## (.+)$/gm,'<h2>$1</h2>')
+        .replace(/^# (.+)$/gm,'<h1>$1</h1>')
+        .replace(/\*\*(.+?)\*\*/g,'<strong>$1</strong>')
+        .replace(/\*(.+?)\*/g,'<em>$1</em>')
+        .replace(/^- (.+)$/gm,'<li>$1</li>')
+        .replace(/\n\n/g,'<br><br>');
+    },
+
+    _rename(name) {
+      if (!this._id) return;
+      State.dashboards[this._id].name = name;
+      State.dashboards[this._id].modified = Date.now();
+      Storage.save();
+    },
+
+    // ── Add block modal ──────────────────────────────────────────────────────
+    _addBlock() {
+      if (!State.data) { UI.toast('Load data first'); return; }
+      const reg = Charts._registry;
+      const plotOpts = reg.length
+        ? reg.map(c=>`<option value="${c.id}">${Fmt.escHtml(c.title)}</option>`).join('')
+        : '<option value="">No charts available — visit Explore first</option>';
+      const numCols = State.columns.filter(c=>c.type==='numeric');
+      const numOpts = numCols.map(c=>`<option value="${c.name}">${Fmt.escHtml(c.name)}</option>`).join('');
+      const colChecks = State.columns.map(c=>
+        `<label style="display:inline-flex;align-items:center;gap:4px;font-size:12px">
+          <input type="checkbox" value="${c.name}" checked> ${Fmt.escHtml(c.name)}</label>`).join('');
+
+      Modal.show('Add block', `
+        <label class="modal-label">Block type</label>
+        <select id="mBType" class="modal-select" onchange="Pages.dashboard._toggleTypeFields()">
+          <option value="plot">Plot (from chart registry)</option>
+          <option value="kpi">KPI card</option>
+          <option value="table">Data table</option>
+          <option value="text">Text / Markdown</option>
+        </select>
+        <div id="mFPlot">
+          <label class="modal-label">Chart</label>
+          <select id="mChartId" class="modal-select">${plotOpts}</select>
+        </div>
+        <div id="mFKpi" style="display:none">
+          <label class="modal-label">Column</label>
+          <select id="mKpiCol" class="modal-select">${numOpts}</select>
+          <label class="modal-label">Function</label>
+          <select id="mKpiFn" class="modal-select">
+            <option value="mean">Mean</option><option value="sum">Sum</option>
+            <option value="min">Min</option><option value="max">Max</option>
+            <option value="count">Count (rows)</option>
+          </select>
+          <label class="modal-label">Label</label>
+          <input id="mKpiLabel" class="modal-input" placeholder="e.g. Average fare">
+        </div>
+        <div id="mFTable" style="display:none">
+          <label class="modal-label">Columns to show</label>
+          <div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:4px">${colChecks}</div>
+          <label class="modal-label" style="margin-top:10px">Max rows</label>
+          <input id="mTableLimit" class="modal-input" type="number" value="10" min="1" max="200">
+        </div>
+        <div id="mFText" style="display:none">
+          <label class="modal-label">Content (Markdown supported)</label>
+          <textarea id="mTextContent" class="modal-input" rows="5" style="resize:vertical" placeholder="## Heading&#10;Your text here..."></textarea>
+        </div>
+        <label class="modal-label" style="margin-top:10px">Title (optional)</label>
+        <input id="mBTitle" class="modal-input" placeholder="Leave blank to use chart/column name">
+        <label class="modal-label">Width</label>
+        <select id="mBWidth" class="modal-select">
+          <option value="full">Full width</option>
+          <option value="half">Half width</option>
+          <option value="third">Third width</option>
+        </select>
+      `, () => {
+        const type  = document.getElementById('mBType').value;
+        const width = document.getElementById('mBWidth').value;
+        let title   = document.getElementById('mBTitle').value.trim();
+        const id = `blk_${Date.now()}`;
+        const block = { id, type, width };
+
+        if (type==='plot') {
+          block.chartId = document.getElementById('mChartId')?.value||null;
+          block.title   = title || Charts._registry.find(c=>c.id===block.chartId)?.title || 'Plot';
+        } else if (type==='kpi') {
+          block.col   = document.getElementById('mKpiCol')?.value;
+          block.fn    = document.getElementById('mKpiFn')?.value;
+          block.label = document.getElementById('mKpiLabel')?.value.trim() || block.col;
+          block.title = title || block.label;
+        } else if (type==='table') {
+          block.cols  = [...document.querySelectorAll('#mFTable input[type=checkbox]:checked')].map(cb=>cb.value);
+          block.limit = parseInt(document.getElementById('mTableLimit')?.value||'10');
+          block.title = title || 'Data table';
+        } else if (type==='text') {
+          block.content = document.getElementById('mTextContent')?.value||'';
+          block.title   = title || 'Text';
+        }
+
+        const d = State.dashboards[this._id];
+        d.blocks.push(block);
+        d.modified = Date.now();
+        Storage.save();
+        this._renderEditor();
+      });
+    },
+
+    _toggleTypeFields() {
+      const type = document.getElementById('mBType').value;
+      ['mFPlot','mFKpi','mFTable','mFText'].forEach(id => {
+        const el = document.getElementById(id);
+        if (el) el.style.display = 'none';
+      });
+      const map = { plot:'mFPlot', kpi:'mFKpi', table:'mFTable', text:'mFText' };
+      const t = document.getElementById(map[type]);
+      if (t) t.style.display = '';
+    },
+
+    _editBlock(blockId) {
+      const d = State.dashboards[this._id];
+      const b = d.blocks.find(x=>x.id===blockId);
+      if (!b) return;
+      Modal.show(`Edit block`, `
+        <label class="modal-label">Title</label>
+        <input id="meTitle" class="modal-input" value="${Fmt.escHtml(b.title||'')}">
+        <label class="modal-label">Width</label>
+        <select id="meWidth" class="modal-select">
+          ${['full','half','third'].map(w=>`<option value="${w}"${b.width===w?' selected':''}>${w}</option>`).join('')}
+        </select>
+        ${b.type==='kpi'? `
+          <label class="modal-label">Label</label>
+          <input id="meKpiLabel" class="modal-input" value="${Fmt.escHtml(b.label||'')}">
+        `:b.type==='text'? `
+          <label class="modal-label">Content</label>
+          <textarea id="meText" class="modal-input" rows="6" style="resize:vertical">${Fmt.escHtml(b.content||'')}</textarea>
+        `:b.type==='table'? `
+          <label class="modal-label">Max rows</label>
+          <input id="meLimit" class="modal-input" type="number" value="${b.limit||10}" min="1" max="200">
+        `:''}
+      `, () => {
+        b.title = document.getElementById('meTitle').value.trim() || b.title;
+        b.width = document.getElementById('meWidth').value;
+        if (b.type==='kpi')   b.label   = document.getElementById('meKpiLabel')?.value.trim() || b.label;
+        if (b.type==='text')  b.content = document.getElementById('meText')?.value || '';
+        if (b.type==='table') b.limit   = parseInt(document.getElementById('meLimit')?.value||'10');
+        d.modified = Date.now();
+        Storage.save();
+        this._renderEditor();
+      });
+    },
+
+    _removeBlock(blockId) {
+      const d = State.dashboards[this._id];
+      d.blocks = d.blocks.filter(b=>b.id!==blockId);
+      d.modified = Date.now();
+      Storage.save();
+      this._renderEditor();
+    },
+
+    _setWidth(blockId, width) {
+      const d = State.dashboards[this._id];
+      const b = d.blocks.find(x=>x.id===blockId);
+      if (!b) return;
+      b.width = width; d.modified = Date.now(); Storage.save(); this._renderEditor();
+    },
+
+    // ── Drag and drop ────────────────────────────────────────────────────────
+    _initDnD() {
+      const grid = document.getElementById('dash-grid');
+      if (!grid) return;
+      let dragId = null;
+      grid.querySelectorAll('.dash-block').forEach(card => {
+        card.addEventListener('dragstart', e => {
+          dragId = card.dataset.id;
+          setTimeout(() => card.classList.add('dragging'), 0);
+          e.dataTransfer.effectAllowed = 'move';
+        });
+        card.addEventListener('dragend', () => {
+          dragId = null;
+          grid.querySelectorAll('.dash-block').forEach(c => c.classList.remove('dragging','drag-over'));
+        });
+        card.addEventListener('dragover', e => {
+          e.preventDefault();
+          if (dragId && card.dataset.id !== dragId) card.classList.add('drag-over');
+        });
+        card.addEventListener('dragleave', e => {
+          if (!card.contains(e.relatedTarget)) card.classList.remove('drag-over');
+        });
+        card.addEventListener('drop', e => {
+          e.preventDefault();
+          card.classList.remove('drag-over');
+          if (!dragId || card.dataset.id === dragId) return;
+          const d = State.dashboards[this._id];
+          const fi = d.blocks.findIndex(b=>b.id===dragId);
+          const ti = d.blocks.findIndex(b=>b.id===card.dataset.id);
+          if (fi<0 || ti<0) return;
+          const [moved] = d.blocks.splice(fi, 1);
+          d.blocks.splice(ti, 0, moved);
+          d.modified = Date.now();
+          Storage.save();
+          this._renderEditor();
+        });
+      });
+    },
+
+    // ── Export ───────────────────────────────────────────────────────────────
+    async _export(id) {
+      const d = State.dashboards[id];
+      if (!d) return;
+      UI.toast('Fetching Plotly for offline bundle...');
+      let plotlyJs = '';
+      try {
+        const r = await fetch('https://cdn.plot.ly/plotly-2.35.2.min.js');
+        if (!r.ok) throw new Error(r.status);
+        plotlyJs = await r.text();
+      } catch(e) {
+        UI.toast('Could not fetch Plotly — check your connection and try again.'); return;
+      }
+
+      const resolved = d.blocks.map(b => {
+        if (b.type!=='plot') return b;
+        const entry = Charts._registry.find(c=>c.id===b.chartId);
+        return entry ? { ...b, _traces:entry.traces, _layout:entry.layout } : b;
+      });
+
+      const wMap = { full:'100%', half:'calc(50% - 8px)', third:'calc(33.33% - 11px)' };
+      const blocksHtml = resolved.map(b => {
+        const ws = wMap[b.width||'full'];
+        let body = '';
+        if (b.type==='plot' && b._traces) {
+          body = `<div id="exp-${b.id}" style="min-height:260px"></div>`;
+        } else if (b.type==='plot') {
+          body = `<p style="color:#888;font-size:12px">Chart data not available — regenerate and re-export.</p>`;
+        } else if (b.type==='kpi') {
+          const val = this._calcKpi(b);
+          body = `<div style="padding:4px 0"><div style="font-size:11px;color:#8b8fa8;margin-bottom:4px">${Fmt.escHtml(b.label||b.col||'')}</div><div style="font-size:30px;font-weight:700;color:#4f7cff;font-variant-numeric:tabular-nums">${val}</div><div style="font-size:11px;color:#666;margin-top:5px">${Fmt.escHtml(b.col||'')} &mdash; ${b.fn||'count'}</div></div>`;
+        } else if (b.type==='table') {
+          body = this._tableHtml(b);
+        } else if (b.type==='text') {
+          body = `<div style="font-size:13px;line-height:1.7">${this._md(b.content||'')}</div>`;
+        }
+        return `<div style="background:#1a1d27;border:1px solid #2e3148;border-radius:3px;padding:14px;flex:0 0 ${ws};min-width:0;box-sizing:border-box"><div style="font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.07em;color:#8b8fa8;margin-bottom:10px">${Fmt.escHtml(b.title||b.type)}</div>${body}</div>`;
+      }).join('\n');
+
+      const plotInits = resolved.filter(b=>b.type==='plot'&&b._traces).map(b =>
+        `Plotly.newPlot(document.getElementById('exp-${b.id}'),${JSON.stringify(b._traces)},${JSON.stringify(b._layout||{})},{displayModeBar:false,responsive:true});`
+      ).join('\n');
+
+      const html = `<!DOCTYPE html>\n<html lang="en">\n<head>\n<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">\n<title>${Fmt.escHtml(d.name)} — Data Lab</title>\n<style>\n*{box-sizing:border-box;margin:0;padding:0}\nbody{background:#0f1117;color:#e0e0f0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",system-ui,sans-serif;padding:32px}\nh1{font-size:20px;font-weight:700;margin-bottom:6px}\n.meta{font-size:12px;color:#8b8fa8;margin-bottom:28px}\n.grid{display:flex;flex-wrap:wrap;gap:16px;align-items:start}\ntable{border-collapse:collapse;width:100%;font-size:11px}\nth,td{border:1px solid #2e3148;padding:5px 8px;text-align:left}\nth{background:#2e3148;font-weight:600}\n@media(max-width:700px){.grid>*{flex:0 0 100%!important}}\n</style>\n</head>\n<body>\n<h1>${Fmt.escHtml(d.name)}</h1>\n<div class="meta">Exported from Data Lab &mdash; ${new Date().toLocaleDateString()}</div>\n<div class="grid">\n${blocksHtml}\n</div>\n<script>\n${plotlyJs}\n<\/script>\n<script>\n${plotInits}\n<\/script>\n</body>\n</html>`;
+
+      const blob = new Blob([html], { type:'text/html' });
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = `${d.name.replace(/[^a-z0-9]/gi,'_')}.html`;
+      a.click();
+      URL.revokeObjectURL(a.href);
+      UI.toast(`Exported ${d.name}.html`);
     },
   },
 
@@ -2575,6 +3025,7 @@ const Themes = {
     if (p === 'explore')       setTimeout(() => Pages.explore.render(), 50);
     if (p === 'column-detail') setTimeout(() => Pages.columnDetail.render(), 50);
     if (p === 'transform')     setTimeout(() => Pages.transform.render(), 50);
+    if (p === 'dashboard')     setTimeout(() => Pages.dashboard.render(), 50);
   },
 };
 
@@ -2619,6 +3070,7 @@ const UI = {
 
   loadCSV(text, name) {
     State.transforms = [];
+    Charts._registry = [];
     const ok = DataEngine.parseCSV(text, name);
     if (!ok) { this.toast('Could not parse CSV.'); return; }
     this.navigate('overview');
