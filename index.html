@@ -1067,6 +1067,459 @@ const I = {
 };
 
 // ════════════════════════════════════════════════════════════════════════════
+// MODELS ENGINE  (Phase 5b — Scorecard)
+// ════════════════════════════════════════════════════════════════════════════
+const ModelsEngine = {
+
+  // ── Top-level orchestrator ───────────────────────────────────────────────
+  runScorecard(params) {
+    const {
+      target, predictors, data, columns,
+      maxBins = 5, preBinsK = 20, minBinSize = 0.05,
+      monotonicity = 'auto', catOrdering = 'event_rate',
+      ivThreshold = 0.02,
+      lambda = 0.01, maxIter = 500,
+      PDO = 20, baseScore = 600, baseOdds = 1 / 19,
+      weightCol = null,
+    } = params;
+
+    const wFn = r => weightCol ? (Number(r[weightCol]) || 1) : 1;
+
+    // Rows with valid binary target
+    const allRows = data.filter(r => { const t = Number(r[target]); return t === 0 || t === 1; });
+    if (!allRows.length) throw new Error('No rows with binary target (0/1)');
+
+    const totalE  = allRows.reduce((s,r) => s + Number(r[target]) * wFn(r), 0);
+    const totalNE = allRows.reduce((s,r) => s + (1 - Number(r[target])) * wFn(r), 0);
+    if (totalE === 0 || totalNE === 0) throw new Error('Target must have both events (1) and non-events (0)');
+
+    // Training rows (use _split if present)
+    const hasSplit = columns.some(c => c.name === '_split');
+    const trainRows = hasSplit ? allRows.filter(r => r['_split'] === 'train') : allRows;
+    if (!trainRows.length) throw new Error('No training rows found');
+
+    const trainE  = trainRows.reduce((s,r) => s + Number(r[target]) * wFn(r), 0);
+    const trainNE = trainRows.reduce((s,r) => s + (1 - Number(r[target])) * wFn(r), 0);
+
+    // ── Per-predictor binning ─────────────────────────────────────────────
+    const woe_tables = {};
+    const iv_summary = {};
+
+    for (const col of predictors) {
+      if (col === target || col === weightCol) continue;
+      const colMeta = columns.find(c => c.name === col);
+      const isCat = colMeta?.type === 'categorical';
+
+      let preBinsArr;
+      if (isCat) {
+        const ordered = this.categoryOrder(trainRows, col, target, catOrdering, wFn);
+        preBinsArr = this.catPreBin(trainRows, col, target, ordered, wFn);
+      } else {
+        preBinsArr = this.preBin(trainRows, col, target, preBinsK, wFn);
+      }
+      if (preBinsArr.length < 1) continue;
+
+      // DP → monotonicity → WoE
+      let merged = this.dpOptimize(preBinsArr, maxBins, trainE, trainNE);
+      if (!isCat && monotonicity !== 'unconstrained') {
+        merged = this.enforceMonotonicity(merged, monotonicity, trainE, trainNE);
+      }
+      let bins = this.computeWoE(merged, trainE, trainNE);
+
+      // Add null bin if column has any nulls in training data
+      const nb = this.nullBin(trainRows, col, target, wFn, trainE, trainNE);
+      if (nb) bins = [...bins, nb];
+
+      const colIV = bins.reduce((s,b) => s + (b.iv || 0), 0);
+      iv_summary[col] = colIV;
+      woe_tables[col] = bins;
+    }
+
+    // Filter to predictors that pass IV threshold
+    const usedPredictors = predictors.filter(col => col !== target && col !== weightCol && (iv_summary[col] || 0) >= ivThreshold && woe_tables[col]);
+    const P = usedPredictors.length;
+    if (!P) throw new Error(`No predictors passed IV threshold (${ivThreshold}). Try lowering IV threshold or adding more predictors.`);
+
+    // ── Compress → LR ────────────────────────────────────────────────────
+    const compressed = this.compress(trainRows, usedPredictors, target, wFn, woe_tables);
+    const { coef, intercept } = this.fitLR(compressed, P, lambda, maxIter);
+
+    // ── Points scaling ────────────────────────────────────────────────────
+    const points_tables = this.scalePoints(coef, intercept, usedPredictors, woe_tables, P, PDO, baseScore, baseOdds);
+
+    // ── Evaluate per split ────────────────────────────────────────────────
+    const tempModel = { predictors: usedPredictors, woe_tables, coef, intercept };
+    const metrics = {};
+    const splits = hasSplit ? ['train','validation','test'] : ['full'];
+    for (const split of splits) {
+      const splitRows = split === 'full' ? allRows : allRows.filter(r => r['_split'] === split);
+      if (!splitRows.length) continue;
+      const scored = splitRows.map(r => ({
+        target: Number(r[target]),
+        score: this.predictProba(r, tempModel),
+        w: wFn(r),
+      }));
+      metrics[split] = this.evaluate(scored);
+    }
+
+    return {
+      type: 'scorecard',
+      id: '_mdl_' + Math.random().toString(36).slice(2, 8),
+      name: 'Scorecard',
+      params,
+      target,
+      predictors: usedPredictors,
+      allPredictors: predictors,
+      woe_tables,
+      coef,
+      intercept,
+      points_tables,
+      iv_summary,
+      metrics,
+      createdAt: Date.now(),
+    };
+  },
+
+  // ── Stage 1: Numeric pre-binning (K weighted-quantile bins) ─────────────
+  preBin(rows, col, targetCol, K, wFn) {
+    const valid = rows.filter(r =>
+      r[col] != null && r[col] !== '' && !isNaN(Number(r[col])) &&
+      (Number(r[targetCol]) === 0 || Number(r[targetCol]) === 1)
+    );
+    if (valid.length < 2) return [];
+    const sorted = [...valid].sort((a, b) => Number(a[col]) - Number(b[col]));
+    const totalW = sorted.reduce((s, r) => s + wFn(r), 0);
+    const step = totalW / Math.min(K, valid.length);
+
+    const bins = [];
+    let items = [], cumW = 0, targetW = step, lower = -Infinity;
+
+    for (let i = 0; i < sorted.length; i++) {
+      const r = sorted[i];
+      const val = Number(r[col]);
+      items.push(r);
+      cumW += wFn(r);
+      const isLast = i === sorted.length - 1;
+      const nextDiff = isLast || Number(sorted[i + 1][col]) !== val;
+
+      if ((cumW >= targetW && nextDiff) || isLast) {
+        const events = items.reduce((s, x) => s + Number(x[targetCol]) * wFn(x), 0);
+        const weight = items.reduce((s, x) => s + wFn(x), 0);
+        bins.push({ lower, upper: val, events, nonevents: weight - events, weight });
+        lower = val; items = []; targetW += step;
+      }
+    }
+    if (bins.length) bins[bins.length - 1].upper = Infinity;
+    return bins;
+  },
+
+  // ── Stage 2a: Categorical ordering ───────────────────────────────────────
+  categoryOrder(rows, col, targetCol, mode, wFn) {
+    const map = new Map();
+    for (const r of rows) {
+      const c = r[col];
+      if (c == null || c === '') continue;
+      if (!map.has(c)) map.set(c, { e: 0, w: 0 });
+      const w = wFn(r);
+      map.get(c).e += Number(r[targetCol]) * w;
+      map.get(c).w += w;
+    }
+    const cats = [...map.entries()].map(([cat, s]) => ({
+      cat, e: s.e, w: s.w, rate: s.w > 0 ? s.e / s.w : 0,
+    }));
+    if (mode === 'frequency')    return cats.sort((a, b) => a.w - b.w).map(c => c.cat);
+    if (mode === 'alphabetical') return cats.map(c => c.cat).sort((a, b) => String(a).localeCompare(String(b)));
+    return cats.sort((a, b) => a.rate - b.rate).map(c => c.cat); // event_rate / target_mean / default
+  },
+
+  // ── Stage 2b: Categorical pre-bins (one bin per ordered category) ────────
+  catPreBin(rows, col, targetCol, orderedCats, wFn) {
+    return orderedCats.map(cat => {
+      const cr = rows.filter(r => r[col] === cat);
+      const events = cr.reduce((s, r) => s + Number(r[targetCol]) * wFn(r), 0);
+      const weight = cr.reduce((s, r) => s + wFn(r), 0);
+      return { cats: [cat], events, nonevents: weight - events, weight };
+    }).filter(b => b.weight > 0);
+  },
+
+  // ── Stage 3: DP optimization (O(K² × maxBins)) ───────────────────────────
+  dpOptimize(preBins, maxBins, totalE, totalNE) {
+    const K = preBins.length;
+    if (K <= maxBins) return preBins;
+
+    // Prefix sums for O(1) segment IV
+    const pE = new Array(K + 1).fill(0);
+    const pNE = new Array(K + 1).fill(0);
+    for (let i = 0; i < K; i++) {
+      pE[i + 1]  = pE[i]  + preBins[i].events;
+      pNE[i + 1] = pNE[i] + preBins[i].nonevents;
+    }
+    const ivSeg = (l, r) => this._ivSeg(pE[r] - pE[l], pNE[r] - pNE[l], totalE, totalNE);
+
+    const NI = -Infinity;
+    const dp    = Array.from({length: maxBins + 1}, () => new Float64Array(K + 1).fill(NI));
+    const split = Array.from({length: maxBins + 1}, () => new Int16Array(K + 1).fill(-1));
+    dp[0][0] = 0;
+
+    for (let j = 1; j <= maxBins; j++) {
+      for (let i = j; i <= K; i++) {
+        for (let l = j - 1; l < i; l++) {
+          if (dp[j - 1][l] === NI) continue;
+          const val = dp[j - 1][l] + ivSeg(l, i);
+          if (val > dp[j][i]) { dp[j][i] = val; split[j][i] = l; }
+        }
+      }
+    }
+
+    // Best number of bins (use all up to maxBins, pick the one maximising IV)
+    let bestJ = 1, bestIV = NI;
+    for (let j = 1; j <= maxBins; j++) {
+      if (dp[j][K] > bestIV) { bestIV = dp[j][K]; bestJ = j; }
+    }
+
+    // Backtrack split points
+    const pts = [];
+    let rem = K, j = bestJ;
+    while (j > 0) { pts.unshift(split[j][rem]); rem = split[j][rem]; j--; }
+
+    // Build merged bins
+    return pts.map((start, g) => {
+      const end = g + 1 < pts.length ? pts[g + 1] : K;
+      const grp = preBins.slice(start, end);
+      const events    = grp.reduce((s, b) => s + b.events, 0);
+      const nonevents = grp.reduce((s, b) => s + b.nonevents, 0);
+      const weight    = grp.reduce((s, b) => s + b.weight, 0);
+      const bin = { events, nonevents, weight };
+      if (grp[0].cats !== undefined) bin.cats = grp.flatMap(b => b.cats);
+      else { bin.lower = grp[0].lower; bin.upper = grp[grp.length - 1].upper; }
+      return bin;
+    });
+  },
+
+  _ivSeg(e, ne, totalE, totalNE) {
+    if (e <= 0 || ne <= 0 || totalE <= 0 || totalNE <= 0) return 0;
+    const er = e / totalE, ner = ne / totalNE;
+    return (er - ner) * Math.log(er / ner);
+  },
+
+  // ── Stage 4: Monotonicity enforcement ────────────────────────────────────
+  enforceMonotonicity(bins, mode, totalE, totalNE) {
+    if (mode === 'unconstrained') return bins;
+    const woe = b => {
+      const er = b.events / totalE, ner = b.nonevents / totalNE;
+      return (er > 0 && ner > 0) ? Math.log(er / ner) : 0;
+    };
+    const tryDir = dir => {
+      const bs = bins.map(b => ({ ...b }));
+      let changed = true;
+      while (changed) {
+        changed = false;
+        for (let i = 0; i < bs.length - 1; i++) {
+          const ok = dir === 'asc' ? woe(bs[i]) <= woe(bs[i + 1]) : woe(bs[i]) >= woe(bs[i + 1]);
+          if (!ok) {
+            const m = { events: bs[i].events + bs[i+1].events, nonevents: bs[i].nonevents + bs[i+1].nonevents, weight: bs[i].weight + bs[i+1].weight };
+            if (bs[i].cats) m.cats = [...bs[i].cats, ...bs[i+1].cats];
+            else { m.lower = bs[i].lower; m.upper = bs[i+1].upper; }
+            bs.splice(i, 2, m); changed = true; break;
+          }
+        }
+      }
+      return bs;
+    };
+    if (mode === 'ascending')  return tryDir('asc');
+    if (mode === 'descending') return tryDir('desc');
+    // auto: pick direction with higher total IV
+    const ivTotal = arr => arr.reduce((s, b) => s + this._ivSeg(b.events, b.nonevents, totalE, totalNE), 0);
+    const asc = tryDir('asc'), desc = tryDir('desc');
+    return ivTotal(asc) >= ivTotal(desc) ? asc : desc;
+  },
+
+  // ── Stage 5: Null bin ─────────────────────────────────────────────────────
+  nullBin(rows, col, targetCol, wFn, totalE, totalNE) {
+    const nullRows = rows.filter(r => r[col] == null || r[col] === '' || (typeof r[col] === 'number' && isNaN(r[col])));
+    if (!nullRows.length) return null;
+    const events = nullRows.reduce((s, r) => s + Number(r[targetCol]) * wFn(r), 0);
+    const weight = nullRows.reduce((s, r) => s + wFn(r), 0);
+    const nonevents = weight - events;
+    const er = totalE > 0 ? events / totalE : 0;
+    const ner = totalNE > 0 ? nonevents / totalNE : 0;
+    const woe = (er > 0 && ner > 0) ? Math.log(er / ner) : 0;
+    const iv  = (er > 0 && ner > 0) ? (er - ner) * woe : 0;
+    return { isNull: true, events, nonevents, weight, woe, iv, label: 'Missing', binIdx: -1 };
+  },
+
+  // ── Stage 6: WoE + IV per bin ─────────────────────────────────────────────
+  computeWoE(bins, totalE, totalNE) {
+    return bins.map((b, i) => {
+      const er = totalE > 0 ? b.events / totalE : 0;
+      const ner = totalNE > 0 ? b.nonevents / totalNE : 0;
+      const woe = (er > 0 && ner > 0) ? Math.log(er / ner) : 0;
+      const iv  = (er > 0 && ner > 0) ? (er - ner) * woe : 0;
+      let label;
+      if (b.cats) {
+        label = b.cats.length === 1 ? String(b.cats[0]) : b.cats.join(' / ');
+      } else {
+        const lo = b.lower, hi = b.upper;
+        label = lo === -Infinity ? `≤ ${Fmt.num(hi)}` :
+                hi === Infinity  ? `> ${Fmt.num(lo)}` :
+                                   `> ${Fmt.num(lo)} to ${Fmt.num(hi)}`;
+      }
+      return { ...b, woe, iv, label, binIdx: i };
+    });
+  },
+
+  // ── Stage 7: Compress rows into bin-combination groups ───────────────────
+  compress(rows, predictors, targetCol, wFn, woe_tables) {
+    const getBin = (r, col) => {
+      const bins = woe_tables[col];
+      if (!bins) return null;
+      const val = r[col];
+      if (val == null || val === '' || (typeof val === 'number' && isNaN(val)))
+        return bins.find(b => b.isNull) || null;
+      if (bins[0].cats !== undefined)
+        return bins.find(b => b.cats?.some(c => String(c) === String(val))) || null;
+      const nv = Number(val);
+      return bins.find(b => nv > b.lower && nv <= b.upper) || bins.find(b => !b.isNull) || null;
+    };
+
+    const groups = new Map();
+    for (const r of rows) {
+      const binObjs = predictors.map(col => getBin(r, col));
+      const key = binObjs.map(b => b ? b.binIdx : -1).join('|');
+      if (!groups.has(key)) {
+        groups.set(key, {
+          woeValues: binObjs.map(b => b ? (b.woe || 0) : 0),
+          events: 0, nonevents: 0, weight: 0,
+        });
+      }
+      const g = groups.get(key);
+      const w = wFn(r);
+      g.events    += Number(r[targetCol]) * w;
+      g.nonevents += (1 - Number(r[targetCol])) * w;
+      g.weight    += w;
+    }
+    return [...groups.values()];
+  },
+
+  // ── Stage 8: L2-regularised logistic regression (gradient descent) ───────
+  fitLR(compressed, P, lambda, maxIter) {
+    const coef = new Array(P).fill(0);
+    let intercept = 0;
+    const lr = 0.1;
+    const sig = z => 1 / (1 + Math.exp(-Math.max(-30, Math.min(30, z))));
+
+    for (let iter = 0; iter < maxIter; iter++) {
+      const gC = new Array(P).fill(0);
+      let gI = 0, totalW = 0;
+
+      for (const row of compressed) {
+        const { woeValues: wv, events, weight } = row;
+        const y = events / weight;
+        let z = intercept;
+        for (let j = 0; j < P; j++) z += coef[j] * wv[j];
+        const resid = (sig(z) - y) * weight;
+        gI += resid;
+        for (let j = 0; j < P; j++) gC[j] += resid * wv[j];
+        totalW += weight;
+      }
+
+      const sc = 1 / (totalW || 1);
+      intercept -= lr * sc * gI;
+      for (let j = 0; j < P; j++) {
+        coef[j] -= lr * (sc * gC[j] + 2 * lambda * coef[j]);
+      }
+    }
+    return { coef, intercept };
+  },
+
+  // ── Stage 9: PDO points scaling ────────────────────────────────────────
+  scalePoints(coef, intercept, predictors, woe_tables, P, PDO, baseScore, baseOdds) {
+    const B = PDO / Math.log(2);
+    const A = baseScore + B * Math.log(baseOdds);
+    // base_pts = A - B*β₀ (intercept contribution to total score)
+    // Each predictor bin contributes: -B * βⱼ * WoEⱼ  (no intercept split)
+    // Total = base_pts + Σ pts  →  logOdds = (A - total) / B = β₀ + Σβⱼ*WoEⱼ = logit ✓
+    const base_pts = Math.round(A - B * intercept);
+    const tables = {};
+    for (let j = 0; j < P; j++) {
+      const col = predictors[j];
+      tables[col] = (woe_tables[col] || []).map(b => ({
+        ...b,
+        points: Math.round(-B * coef[j] * b.woe),
+      }));
+    }
+    tables._meta = { A, B, base_pts, baseScore, PDO, baseOdds };
+    return tables;
+  },
+
+  // ── Probability prediction (for evaluation + apply_model) ────────────────
+  predictProba(row, model) {
+    const { predictors, woe_tables, coef, intercept } = model;
+    let z = intercept;
+    for (let j = 0; j < predictors.length; j++) {
+      const col = predictors[j];
+      const bin = this._findBin(row[col], woe_tables[col]);
+      z += coef[j] * (bin ? bin.woe || 0 : 0);
+    }
+    return 1 / (1 + Math.exp(-Math.max(-30, Math.min(30, z))));
+  },
+
+  // ── Score a single row → totalPoints + prob + woe/bin per predictor ──────
+  scoreRow(row, model) {
+    const { predictors, points_tables } = model;
+    const { A = 0, B = 20 / Math.log(2), base_pts = 0 } = points_tables._meta || {};
+    // totalPoints = base_pts + Σ variable_pts  →  logOdds = (A - totalPoints) / B = logit ✓
+    let varPts = 0;
+    const woeValues = {}, binLabels = {};
+    for (const col of predictors) {
+      const bins = points_tables[col];
+      if (!bins) continue;
+      const bin = this._findBin(row[col], bins);
+      const b = bin || bins[0] || {};
+      varPts += b.points || 0;
+      woeValues[col] = b.woe || 0;
+      binLabels[col] = b.label || '';
+    }
+    const totalPoints = base_pts + varPts;
+    const logOdds = (A - totalPoints) / B;
+    const prob = 1 / (1 + Math.exp(-Math.max(-30, Math.min(30, logOdds))));
+    return { totalPoints, varPts, base_pts, prob, woeValues, binLabels };
+  },
+
+  _findBin(val, bins) {
+    if (!bins) return null;
+    if (val == null || val === '' || (typeof val === 'number' && isNaN(val)))
+      return bins.find(b => b.isNull) || null;
+    if (bins[0]?.cats !== undefined)
+      return bins.find(b => b.cats?.some(c => String(c) === String(val))) || null;
+    const nv = Number(val);
+    return bins.find(b => nv > b.lower && nv <= b.upper) || bins.find(b => !b.isNull) || null;
+  },
+
+  // ── Evaluation: Gini / AUC / KS ──────────────────────────────────────────
+  evaluate(scored) {
+    if (!scored.length) return { gini: null, auc: null, ks: null };
+    const sorted = [...scored].sort((a, b) => b.score - a.score);
+    const totalE  = sorted.reduce((s, r) => s + r.target * r.w, 0);
+    const totalNE = sorted.reduce((s, r) => s + (1 - r.target) * r.w, 0);
+    if (totalE === 0 || totalNE === 0) return { gini: null, auc: null, ks: null };
+
+    let cumE = 0, cumNE = 0, auc = 0, ks = 0;
+    let prevTPR = 0, prevFPR = 0;
+    for (const r of sorted) {
+      cumE  += r.target * r.w;
+      cumNE += (1 - r.target) * r.w;
+      const tpr = cumE / totalE, fpr = cumNE / totalNE;
+      auc += (tpr + prevTPR) / 2 * (fpr - prevFPR);
+      ks = Math.max(ks, Math.abs(tpr - fpr));
+      prevTPR = tpr; prevFPR = fpr;
+    }
+    return { gini: 2 * auc - 1, auc, ks };
+  },
+
+};
+
+// ════════════════════════════════════════════════════════════════════════════
 // CHARTS
 // ════════════════════════════════════════════════════════════════════════════
 const Charts = {
