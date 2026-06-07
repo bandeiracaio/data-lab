@@ -211,6 +211,13 @@ a{color:inherit;text-decoration:none}
 .dist-item-head{display:flex;align-items:center;gap:6px;margin-bottom:6px}
 .dist-col-link{font-size:11px;font-weight:550;padding:0;transition:color var(--trans);color:var(--text)}
 .dist-col-link:hover{color:var(--accent)}
+.exp-insights{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:12px 16px;margin-bottom:20px}
+.exp-insights-title{font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.07em;color:var(--text-3);margin-bottom:8px}
+.exp-insights-list{list-style:none;display:flex;flex-direction:column;gap:5px}
+.exp-insights-list li{font-size:12px;color:var(--text-2);display:flex;align-items:flex-start;gap:6px}
+.exp-insights-list li::before{content:"·";color:var(--accent);font-weight:700;flex-shrink:0;margin-top:1px}
+.pp-col-checks{display:flex;flex-wrap:wrap;gap:4px 14px;max-width:420px}
+.pp-col-check{display:flex;align-items:center;gap:5px;font-size:11px;color:var(--text-2);cursor:pointer;white-space:nowrap}
 
 /* ── Toggle group ─────────────────────────────────────────────────────────── */
 .toggle-group{display:inline-flex;background:var(--surface-2);border:1px solid var(--border);border-radius:var(--radius);overflow:hidden}
@@ -2138,6 +2145,11 @@ const Pages = {
   explore: {
     _scatterMode: null,
     _brkType: 'box',
+    _distFilter: { search:'', type:'all' },
+    _distSort: 'default',
+    _scatterTrend: false,
+    _ppCols: null,
+
     render() {
       const el = document.getElementById('page-explore');
       if (!State.data) {
@@ -2148,36 +2160,67 @@ const Pages = {
       const visibleCols = State.columns.filter(c => !c.isWeight);
       const numCols = visibleCols.filter(c => c.type==='numeric');
       const catCols = visibleCols.filter(c => c.type==='categorical');
+      const filteredCols = this._filteredCols(visibleCols);
+      const nullColsList = visibleCols.filter(c => c.nullCount > 0);
       const sm = this._scatterMode;
+      const trend = this._scatterTrend;
+      const { search, type } = this._distFilter;
+      const sort = this._distSort;
+      const allNumNames = numCols.map(c=>c.name);
+      const ppCols = this._ppCols === null ? allNumNames : this._ppCols.filter(c => allNumNames.includes(c));
 
       el.innerHTML = `
-        <div class="section-head"><span class="section-title">Distributions</span></div>
-        <div class="dist-grid" id="distGrid" style="margin-bottom:24px">
-          ${visibleCols.map(col => {
-            const safeId = 'mini-' + col.name.replace(/[^a-zA-Z0-9]/g,'_');
-            return `<div class="dist-item">
-              <div class="dist-item-head">
-                <div class="type-dot ${col.type}" style="flex-shrink:0"></div>
-                <button class="dist-col-link" onclick="UI.openColumnDetail('${col.name}','explore')">${col.name}</button>
-              </div>
-              <div id="${safeId}" style="height:90px"></div>
-            </div>`;
-          }).join('')}
+        ${this._renderInsights(numCols, catCols, visibleCols)}
+
+        <div class="section-head">
+          <span class="section-title">Distributions</span>
+          <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+            <input type="text" class="form-input" placeholder="Search columns…" value="${Fmt.escHtml(search)}" oninput="Pages.explore.setDistSearch(this.value)" style="width:130px;padding:4px 8px">
+            <div class="toggle-group">
+              <button class="toggle-btn ${type==='all'?'active':''}" onclick="Pages.explore.setDistType('all')">All</button>
+              <button class="toggle-btn ${type==='numeric'?'active':''}" onclick="Pages.explore.setDistType('numeric')">N</button>
+              <button class="toggle-btn ${type==='categorical'?'active':''}" onclick="Pages.explore.setDistType('categorical')">C</button>
+            </div>
+            <select class="form-select" style="width:auto" onchange="Pages.explore.setDistSort(this.value)">
+              <option value="default"${sort==='default'?' selected':''}>Default</option>
+              <option value="nullpct"${sort==='nullpct'?' selected':''}>Null % ↓</option>
+              <option value="variance"${sort==='variance'?' selected':''}>Variance ↓</option>
+              <option value="alpha"${sort==='alpha'?' selected':''}>A–Z</option>
+            </select>
+          </div>
         </div>
+        ${filteredCols.length
+          ? `<div class="dist-grid" id="distGrid" style="margin-bottom:24px">${filteredCols.map(col => {
+              const safeId = 'mini-' + col.name.replace(/[^a-zA-Z0-9]/g,'_');
+              return `<div class="dist-item">
+                <div class="dist-item-head">
+                  <div class="type-dot ${col.type}" style="flex-shrink:0"></div>
+                  <button class="dist-col-link" onclick="UI.openColumnDetail('${Fmt.escHtml(col.name)}','explore')">${Fmt.escHtml(col.name)}</button>
+                </div>
+                <div id="${safeId}" style="height:90px"></div>
+              </div>`;
+            }).join('')}</div>`
+          : `<div class="placeholder-msg" style="margin-bottom:24px">No columns match the current filter.</div>`}
 
         ${numCols.length > 1 ? `
         <div class="section-head">
           <span class="section-title">Correlation matrix</span>
           <span style="font-size:11px;color:var(--text-3)">${State.isCubed?'weighted ':''}Pearson r</span>
         </div>
-        <div class="chart-wrap" style="margin-bottom:24px"><div id="chart-heatmap"></div></div>` : ''}
+        <div style="display:flex;gap:20px;margin-bottom:24px;flex-wrap:wrap;align-items:flex-start">
+          <div class="chart-wrap" style="flex:1;min-width:280px"><div id="chart-heatmap"></div></div>
+          <div id="corr-pairs" style="min-width:190px;padding-top:4px"></div>
+        </div>` : ''}
 
         ${numCols.length > 1 ? `
         <div class="section-head">
           <span class="section-title">Scatter</span>
-          <div class="toggle-group">
-            <button class="toggle-btn ${sm==='sample'?'active':''}" onclick="Pages.explore.setMode('sample')">Sample</button>
-            <button class="toggle-btn ${sm==='density'?'active':''}" onclick="Pages.explore.setMode('density')">Density</button>
+          <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
+            <div class="toggle-group">
+              <button class="toggle-btn ${sm==='sample'?'active':''}" onclick="Pages.explore.setMode('sample')">Sample</button>
+              <button class="toggle-btn ${sm==='density'?'active':''}" onclick="Pages.explore.setMode('density')">Density</button>
+            </div>
+            <button class="toggle-btn${trend?' active':''}" onclick="Pages.explore.toggleTrend()">Trendline</button>
           </div>
         </div>
         <div class="card" style="margin-bottom:24px">
@@ -2198,6 +2241,7 @@ const Pages = {
             ${sm==='sample'?`<span style="font-size:11px;color:var(--text-3)">${Math.min(State.settings.sampleSize,State.data.length).toLocaleString()} rows sampled</span>`:''}
           </div>
           <div id="chart-scatter" style="height:320px"></div>
+          <div id="scatter-stats" style="font-size:11px;color:var(--text-2);margin-top:6px;min-height:18px"></div>
         </div>` : ''}
 
         ${numCols.length >= 2 ? `
@@ -2206,12 +2250,18 @@ const Pages = {
           <span style="font-size:11px;color:var(--text-3)">${Math.min(State.settings.sampleSize,State.data.length).toLocaleString()} rows sampled</span>
         </div>
         <div class="card" style="margin-bottom:24px">
-          <div style="display:flex;align-items:center;gap:12px;margin-bottom:10px;flex-wrap:wrap">
-            <span style="font-size:12px;color:var(--text-2)">Color by</span>
-            <select class="form-select" id="ppColor" style="width:150px" onchange="Pages.explore.renderPairplot()">
-              <option value="">— none —</option>
-              ${catCols.map(c=>`<option value="${c.name}">${c.name}</option>`).join('')}
-            </select>
+          <div style="display:flex;align-items:flex-start;gap:16px;margin-bottom:10px;flex-wrap:wrap">
+            <div>
+              <div style="font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.07em;color:var(--text-3);margin-bottom:6px">Columns</div>
+              <div class="pp-col-checks">${numCols.map(c=>`<label class="pp-col-check"><input type="checkbox" ${ppCols.includes(c.name)?'checked':''} onchange="Pages.explore.togglePPCol('${Fmt.escHtml(c.name)}',this.checked)"> ${Fmt.escHtml(c.name)}</label>`).join('')}</div>
+            </div>
+            <div>
+              <div style="font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.07em;color:var(--text-3);margin-bottom:6px">Color by</div>
+              <select class="form-select" id="ppColor" style="width:150px" onchange="Pages.explore.renderPairplot()">
+                <option value="">— none —</option>
+                ${catCols.map(c=>`<option value="${c.name}">${c.name}</option>`).join('')}
+              </select>
+            </div>
           </div>
           <div id="chart-pairplot"></div>
         </div>` : ''}
@@ -2238,60 +2288,247 @@ const Pages = {
           </div>
           <div id="chart-breakdown" style="min-height:300px"></div>
         </div>` : ''}
+
+        ${catCols.length >= 2 ? `
+        <div class="section-head">
+          <span class="section-title">Cross-tab</span>
+          <span style="font-size:11px;color:var(--text-3)">Categorical × Categorical</span>
+        </div>
+        <div class="card" style="margin-bottom:24px">
+          <div style="display:flex;align-items:center;gap:12px;margin-bottom:10px;flex-wrap:wrap">
+            <span style="font-size:12px;color:var(--text-2)">Primary</span>
+            <select class="form-select" id="ctPrim" style="width:150px" onchange="Pages.explore.renderCrossTab()">
+              ${catCols.map(c=>`<option value="${Fmt.escHtml(c.name)}">${Fmt.escHtml(c.name)}</option>`).join('')}
+            </select>
+            <span style="font-size:12px;color:var(--text-2)">Group by</span>
+            <select class="form-select" id="ctGrp" style="width:150px" onchange="Pages.explore.renderCrossTab()">
+              ${catCols.map((c,i)=>`<option value="${Fmt.escHtml(c.name)}"${i===1?' selected':''}>${Fmt.escHtml(c.name)}</option>`).join('')}
+            </select>
+          </div>
+          <div id="chart-crosstab" style="height:300px"></div>
+        </div>` : ''}
+
+        ${nullColsList.length ? `
+        <div class="section-head">
+          <span class="section-title">Missing values</span>
+          <span style="font-size:11px;color:var(--text-3)">${nullColsList.length} column${nullColsList.length!==1?'s':''} with nulls &nbsp;·&nbsp; <span style="color:var(--success)">green</span> = present &nbsp;·&nbsp; <span style="color:var(--danger)">red</span> = missing</span>
+        </div>
+        <div class="card" style="margin-bottom:24px">
+          <div id="chart-missing" style="height:${Math.min(320, nullColsList.length*22+80)}px"></div>
+        </div>` : ''}
       `;
+
       requestAnimationFrame(() => {
-        for (const col of visibleCols) {
+        for (const col of filteredCols) {
           const safeId = 'mini-' + col.name.replace(/[^a-zA-Z0-9]/g,'_');
-          if (col.type === 'numeric') {
-            Charts.miniHist(safeId, State.data, col.name);
-          } else {
-            const s = DataEngine.columnStats(State.data, col.name);
-            Charts.miniBar(safeId, s.valueCounts.slice(0,10).map(([v])=>v), s.valueCounts.slice(0,10).map(([,c])=>c));
-          }
+          if (col.type === 'numeric') Charts.miniHist(safeId, State.data, col.name);
+          else { const s = DataEngine.columnStats(State.data, col.name); Charts.miniBar(safeId, s.valueCounts.slice(0,10).map(([v])=>v), s.valueCounts.slice(0,10).map(([,c])=>c)); }
         }
         if (numCols.length > 1) {
-          const mat = DataEngine.correlationMatrix(numCols.map(c=>c.name));
-          Charts.heatmap('chart-heatmap', mat, numCols.map(c=>c.name));
+          const names = numCols.map(c=>c.name);
+          const mat = DataEngine.correlationMatrix(names);
+          Charts.heatmap('chart-heatmap', mat, names);
           Charts._register('Correlation matrix', 'chart-heatmap');
+          this._renderCorrPairs(mat, names);
           this.renderScatter();
         }
         if (numCols.length >= 2) this.renderPairplot();
         if (numCols.length && catCols.length) this.renderBreakdown();
+        if (catCols.length >= 2) this.renderCrossTab();
+        if (nullColsList.length) this.renderMissingHeatmap(nullColsList);
       });
     },
-    setMode(m) { this._scatterMode = m; this.render(); },
-    setBrkType(t) { this._brkType = t; this.render(); },
+
+    // ── Dist filter / sort ─────────────────────────────────────────────────
+    _filteredCols(visibleCols) {
+      let cols = [...(visibleCols || State.columns.filter(c=>!c.isWeight))];
+      const { search, type } = this._distFilter;
+      if (type !== 'all') cols = cols.filter(c => c.type === type);
+      if (search) { const s = search.toLowerCase(); cols = cols.filter(c => c.name.toLowerCase().includes(s)); }
+      if (this._distSort === 'nullpct') return cols.sort((a,b) => b.nullCount - a.nullCount);
+      if (this._distSort === 'alpha') return cols.sort((a,b) => a.name.localeCompare(b.name));
+      if (this._distSort === 'variance') return cols.sort((a,b) => {
+        const va = a.type==='numeric' ? (DataEngine.columnStats(State.data,a.name).std||0) : (DataEngine.columnStats(State.data,a.name).uniqueCount||0);
+        const vb = b.type==='numeric' ? (DataEngine.columnStats(State.data,b.name).std||0) : (DataEngine.columnStats(State.data,b.name).uniqueCount||0);
+        return vb - va;
+      });
+      return cols;
+    },
+    setDistSearch(v) { this._distFilter.search = v; this.render(); },
+    setDistType(v) { this._distFilter.type = v; this.render(); },
+    setDistSort(v) { this._distSort = v; this.render(); },
+
+    // ── Auto-insights ──────────────────────────────────────────────────────
+    _renderInsights(numCols, catCols, visibleCols) {
+      const insights = [];
+      const nc = visibleCols.filter(c=>c.nullCount>0).sort((a,b)=>b.nullCount-a.nullCount);
+      if (nc.length) {
+        const top = nc[0], pct = (top.nullCount/State.data.length*100).toFixed(1);
+        insights.push(`${nc.length} column${nc.length!==1?'s':''} have missing values — worst: <strong>${Fmt.escHtml(top.name)}</strong> (${pct}%, ${top.nullCount} rows)`);
+      }
+      if (numCols.length > 1) {
+        const names = numCols.map(c=>c.name);
+        const mat = DataEngine.correlationMatrix(names);
+        let best = null, bestAbs = 0;
+        for (let i=0; i<names.length; i++) for (let j=i+1; j<names.length; j++) { const r=mat[i][j]; if (Math.abs(r)>bestAbs) { bestAbs=Math.abs(r); best={a:names[i],b:names[j],r}; } }
+        if (best && bestAbs > 0.15) insights.push(`Strongest correlation: <strong>${Fmt.escHtml(best.a)} × ${Fmt.escHtml(best.b)}</strong> (r = ${best.r.toFixed(3)})`);
+      }
+      let worstSkew = null, worstSkewAbs = 1.5;
+      for (const col of numCols) {
+        const vals = State.data.map(r=>r[col.name]).filter(v=>v!=null&&isFinite(v));
+        if (vals.length < 4) continue;
+        const n=vals.length, mean=vals.reduce((a,b)=>a+b,0)/n;
+        const m2=vals.reduce((s,v)=>s+(v-mean)**2,0)/n, m3=vals.reduce((s,v)=>s+(v-mean)**3,0)/n;
+        const std=Math.sqrt(m2), skew=std>0?m3/std**3:0;
+        if (Math.abs(skew)>worstSkewAbs) { worstSkewAbs=Math.abs(skew); worstSkew={name:col.name,skew}; }
+      }
+      if (worstSkew) insights.push(`<strong>${Fmt.escHtml(worstSkew.name)}</strong> is heavily skewed (${worstSkew.skew>0?'+':''}${worstSkew.skew.toFixed(2)}) — consider a log transform`);
+      for (const col of catCols) {
+        if ((col.uniqueCount||0) > 20) { insights.push(`<strong>${Fmt.escHtml(col.name)}</strong> has ${col.uniqueCount} unique values — may behave like an identifier`); break; }
+      }
+      if (!insights.length) return '';
+      return `<div class="exp-insights">
+        <div class="exp-insights-title">Insights</div>
+        <ul class="exp-insights-list">${insights.map(t=>`<li>${t}</li>`).join('')}</ul>
+      </div>`;
+    },
+
+    // ── Corr top pairs ─────────────────────────────────────────────────────
+    _renderCorrPairs(mat, names) {
+      const el = document.getElementById('corr-pairs');
+      if (!el) return;
+      const pairs = [];
+      for (let i=0; i<names.length; i++) for (let j=i+1; j<names.length; j++) pairs.push({a:names[i],b:names[j],r:mat[i][j]});
+      pairs.sort((a,b)=>Math.abs(b.r)-Math.abs(a.r));
+      const rows = pairs.slice(0,10).map(p => {
+        const color = p.r>0 ? 'var(--success)' : 'var(--danger)';
+        return `<tr>
+          <td style="font-size:11px;color:var(--text-2);padding:3px 0;max-width:175px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${Fmt.escHtml(p.a+' × '+p.b)}">${Fmt.escHtml(p.a)} × ${Fmt.escHtml(p.b)}</td>
+          <td style="font-size:11px;font-weight:600;color:${color};text-align:right;padding:3px 0 3px 12px;white-space:nowrap">${p.r>=0?'+':''}${p.r.toFixed(3)}</td>
+        </tr>`;
+      }).join('');
+      el.innerHTML = `<div style="font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.07em;color:var(--text-3);margin-bottom:8px">Top pairs by |r|</div>
+        <table style="border-collapse:collapse;width:100%"><tbody>${rows}</tbody></table>`;
+    },
+
+    // ── Scatter + trendline ────────────────────────────────────────────────
+    setMode(m) { this._scatterMode=m; this.render(); },
+    toggleTrend() { this._scatterTrend=!this._scatterTrend; this.renderScatter(); },
     renderScatter() {
-      const xEl = document.getElementById('scX');
-      const yEl = document.getElementById('scY');
-      const cEl = document.getElementById('scColor');
-      if (!xEl || !yEl) return;
+      const xEl=document.getElementById('scX'), yEl=document.getElementById('scY'), cEl=document.getElementById('scColor');
+      if (!xEl||!yEl) return;
       const rows = DataEngine.sampleRows(State.settings.sampleSize);
       Charts.scatter('chart-scatter', rows, xEl.value, yEl.value, cEl?.value||null, this._scatterMode||'sample');
       Charts._register(`${xEl.value} vs ${yEl.value}`, 'chart-scatter');
+      const statsEl = document.getElementById('scatter-stats');
+      if (this._scatterTrend) {
+        const xs=[], ys=[];
+        for (const r of rows) { const x=Number(r[xEl.value]), y=Number(r[yEl.value]); if (isFinite(x)&&isFinite(y)) { xs.push(x); ys.push(y); } }
+        if (xs.length > 1) {
+          const n=xs.length, mx=xs.reduce((a,b)=>a+b,0)/n, my=ys.reduce((a,b)=>a+b,0)/n;
+          const ssxy=xs.reduce((s,x,i)=>s+(x-mx)*(ys[i]-my),0), ssxx=xs.reduce((s,x)=>s+(x-mx)**2,0);
+          const slope=ssxx?ssxy/ssxx:0, intercept=my-slope*mx;
+          const yHat=xs.map(x=>slope*x+intercept);
+          const ssTot=ys.reduce((s,y)=>s+(y-my)**2,0), ssRes=ys.reduce((s,y,i)=>s+(y-yHat[i])**2,0);
+          const r2=ssTot?1-ssRes/ssTot:0;
+          const minX=Math.min(...xs), maxX=Math.max(...xs);
+          const chartEl=document.getElementById('chart-scatter');
+          if (chartEl) Plotly.addTraces(chartEl, [{
+            type:'scatter', mode:'lines',
+            x:[minX,maxX], y:[slope*minX+intercept,slope*maxX+intercept],
+            line:{color:'var(--warn)',width:2,dash:'dot'},
+            showlegend:false, hoverinfo:'skip',
+          }]);
+          if (statsEl) statsEl.innerHTML = `OLS: y = ${slope>=0?'+':''}${slope.toFixed(4)}x ${intercept>=0?'+':''}${intercept.toFixed(4)} &nbsp;·&nbsp; R² = ${r2.toFixed(4)} &nbsp;·&nbsp; n = ${n.toLocaleString()}`;
+        }
+      } else { if (statsEl) statsEl.innerHTML = ''; }
+    },
+
+    // ── Pairplot + column selector ─────────────────────────────────────────
+    togglePPCol(col, checked) {
+      const allNum = State.columns.filter(c=>c.type==='numeric'&&!c.isWeight).map(c=>c.name);
+      if (this._ppCols===null) this._ppCols=[...allNum];
+      if (checked && !this._ppCols.includes(col)) this._ppCols.push(col);
+      else if (!checked) this._ppCols=this._ppCols.filter(c=>c!==col);
+      this.renderPairplot();
     },
     renderPairplot() {
-      const numCols = State.columns.filter(c => c.type==='numeric' && !c.isWeight).map(c=>c.name);
-      if (numCols.length < 2) return;
-      const groupEl = document.getElementById('ppColor');
-      const groupCol = groupEl?.value || null;
-      const rows = DataEngine.sampleRows(State.settings.sampleSize);
-      Charts.pairplot('chart-pairplot', rows, numCols, groupCol || null);
-      Charts._register(`Pairplot${groupCol?' by '+groupCol:''}`, 'chart-pairplot');
+      const allNum=State.columns.filter(c=>c.type==='numeric'&&!c.isWeight).map(c=>c.name);
+      const ppCols=(this._ppCols===null?allNum:this._ppCols).filter(c=>allNum.includes(c));
+      const el=document.getElementById('chart-pairplot');
+      if (ppCols.length<2) { if(el) el.innerHTML='<div class="placeholder-msg">Select at least 2 columns.</div>'; return; }
+      const groupEl=document.getElementById('ppColor');
+      const rows=DataEngine.sampleRows(State.settings.sampleSize);
+      Charts.pairplot('chart-pairplot', rows, ppCols, groupEl?.value||null);
+      Charts._register(`Pairplot${groupEl?.value?' by '+groupEl.value:''}`, 'chart-pairplot');
     },
+
+    // ── Breakdown ──────────────────────────────────────────────────────────
+    setBrkType(t) { this._brkType=t; this.render(); },
     renderBreakdown() {
-      const numEl = document.getElementById('brkNum');
-      const catEl = document.getElementById('brkCat');
-      if (!numEl || !catEl) return;
-      const num = numEl.value, cat = catEl.value;
-      const rows = DataEngine.sampleRows(State.settings.sampleSize);
-      const t = this._brkType;
-      if (t === 'histogram') {
-        Charts.groupHist('chart-breakdown', rows, num, cat);
-      } else {
-        Charts.boxViolin('chart-breakdown', rows, num, cat, t);
+      const numEl=document.getElementById('brkNum'), catEl=document.getElementById('brkCat');
+      if (!numEl||!catEl) return;
+      const rows=DataEngine.sampleRows(State.settings.sampleSize), t=this._brkType;
+      if (t==='histogram') Charts.groupHist('chart-breakdown', rows, numEl.value, catEl.value);
+      else Charts.boxViolin('chart-breakdown', rows, numEl.value, catEl.value, t);
+      Charts._register(`${numEl.value} by ${catEl.value} (${t})`, 'chart-breakdown');
+    },
+
+    // ── Cross-tab ──────────────────────────────────────────────────────────
+    renderCrossTab() {
+      const primEl=document.getElementById('ctPrim'), grpEl=document.getElementById('ctGrp'), el=document.getElementById('chart-crosstab');
+      if (!primEl||!grpEl||!el) return;
+      const prim=primEl.value, grp=grpEl.value;
+      if (!prim||!grp) return;
+      const countMap={};
+      const grpVals=new Set();
+      for (const row of State.data) {
+        const pv=String(row[prim]??'(null)'), gv=String(row[grp]??'(null)');
+        grpVals.add(gv);
+        if (!countMap[pv]) countMap[pv]={};
+        countMap[pv][gv]=(countMap[pv][gv]||0)+1;
       }
-      Charts._register(`${num} by ${cat} (${t})`, 'chart-breakdown');
+      const primVals=Object.entries(countMap).sort((a,b)=>Object.values(b[1]).reduce((s,v)=>s+v,0)-Object.values(a[1]).reduce((s,v)=>s+v,0)).slice(0,15).map(([v])=>v);
+      const gVals=[...grpVals].sort().slice(0,12);
+      const pal=Charts._catPalette(gVals.length);
+      const traces=gVals.map((gv,i)=>({
+        type:'bar', name:String(gv),
+        x:primVals, y:primVals.map(pv=>countMap[pv]?.[gv]||0),
+        marker:{color:pal[i]},
+      }));
+      Plotly.react(el, traces, {
+        barmode:'stack', paper_bgcolor:'transparent', plot_bgcolor:'transparent',
+        margin:{t:10,r:10,b:80,l:50},
+        xaxis:{tickangle:-30,tickfont:{size:10},color:'var(--text-2)',gridcolor:'var(--border)',title:{text:prim,font:{size:11}}},
+        yaxis:{color:'var(--text-2)',gridcolor:'var(--border)',tickfont:{size:10},title:{text:'Count',font:{size:11}}},
+        legend:{font:{size:11},bgcolor:'transparent',title:{text:grp,font:{size:11}}},
+        font:{family:'inherit',color:'var(--text-2)'},
+      }, {responsive:true,displayModeBar:false});
+    },
+
+    // ── Missing values heatmap ─────────────────────────────────────────────
+    renderMissingHeatmap(nullColsList) {
+      const el=document.getElementById('chart-missing');
+      if (!el) return;
+      const cols=nullColsList||State.columns.filter(c=>!c.isWeight&&c.nullCount>0);
+      if (!cols.length) return;
+      const step=Math.max(1,Math.floor(State.data.length/150));
+      const sampled=[];
+      for (let i=0;i<State.data.length;i+=step) sampled.push(State.data[i]);
+      const names=cols.map(c=>c.name);
+      const z=sampled.map(row=>names.map(col=>(row[col]==null||row[col]==='') ? 1 : 0));
+      Plotly.react(el, [{
+        type:'heatmap', z, x:names,
+        colorscale:[[0,'#3ecf8e'],[1,'#ff5f5f']],
+        showscale:false, zmin:0, zmax:1,
+        hovertemplate:'%{x}: %{z}<extra></extra>',
+      }], {
+        paper_bgcolor:'transparent', plot_bgcolor:'transparent',
+        margin:{t:10,r:10,b:70,l:30},
+        xaxis:{tickangle:-35,tickfont:{size:10},color:'var(--text-2)'},
+        yaxis:{visible:false},
+        font:{family:'inherit'},
+      }, {responsive:true,displayModeBar:false});
     },
   },
 
