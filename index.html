@@ -2861,7 +2861,7 @@ const Pages = {
     _renderOutputs(model) {
       const r = model.results;
       if (!r) return '';
-      return `${this._renderPerformance(r)}${this._renderScorecardTable(r)}${this._renderIVSummary(r)}${this._renderBinningDetail(r)}`;
+      return `${this._renderPerformance(r)}${this._renderScorecardTable(r, model)}${this._renderIVSummary(r)}${this._renderBinningDetail(r)}`;
     },
 
     _renderPerformance(r) {
@@ -2882,29 +2882,62 @@ const Pages = {
       </div>`;
     },
 
-    _renderScorecardTable(r) {
+    _renderScorecardTable(r, model) {
+      const hm = model?._scHeatmap;
+      const id = model?.id;
+
+      // Compute event rates for all bins → normalise for heatmap
+      const allBins = r.predictors.flatMap(col =>
+        (r.points_tables[col]||[]).filter(b => !b.isNull || b.events > 0));
+      const rates = allBins.map(b => { const tot = b.events + b.nonevents; return tot ? b.events / tot : 0; });
+      const minR = Math.min(...rates), maxR = Math.max(...rates);
+      const rRange = maxR - minR || 1;
+
+      const rateStyle = (b) => {
+        if (!hm) return '';
+        const tot = b.events + b.nonevents;
+        const rate = tot ? b.events / tot : 0;
+        const t = (rate - minR) / rRange;           // 0=blue(low risk), 1=red(high risk)
+        const h = Math.round(240 - t * 240);
+        return ` style="background:hsla(${h},65%,50%,.18);color:hsl(${h},55%,38%);font-weight:600"`;
+      };
+
       const tableRows = r.predictors.flatMap(col => {
         const bins = (r.points_tables[col] || []).filter(b => !b.isNull || b.events > 0);
-        return bins.map((b, i) => `<tr${b.isNull?' class="sc-null-row"':''}>
-          ${i===0 ? `<td rowspan="${bins.length}" class="sc-var-cell">${Fmt.escHtml(col)}<br><span style="font-size:9px;color:var(--text-3)">IV ${(r.iv_summary[col]||0).toFixed(3)}</span></td>` : ''}
-          <td>${Fmt.escHtml(b.label)}</td>
-          <td class="num-val">${b.events.toFixed(1)}</td>
-          <td class="num-val">${b.nonevents.toFixed(1)}</td>
-          <td class="num-val ${b.woe>0?'sc-pos':b.woe<0?'sc-neg':''}">${b.woe.toFixed(4)}</td>
-          <td class="num-val">${(b.iv||0).toFixed(4)}</td>
-          <td class="num-val sc-pts">${b.points>=0?'+':''}${b.points}</td>
-        </tr>`);
+        return bins.map((b, i) => {
+          const tot = b.events + b.nonevents;
+          const evtPct = tot ? (b.events / tot * 100).toFixed(1) + '%' : '—';
+          return `<tr${b.isNull?' class="sc-null-row"':''}>
+            ${i===0 ? `<td rowspan="${bins.length}" class="sc-var-cell">${Fmt.escHtml(col)}<br><span style="font-size:9px;color:var(--text-3)">IV ${(r.iv_summary[col]||0).toFixed(3)}</span></td>` : ''}
+            <td>${Fmt.escHtml(b.label)}</td>
+            <td class="num-val">${b.events.toFixed(1)}</td>
+            <td class="num-val">${b.nonevents.toFixed(1)}</td>
+            <td class="num-val"${rateStyle(b)}>${evtPct}</td>
+            <td class="num-val ${b.woe>0?'sc-pos':b.woe<0?'sc-neg':''}">${b.woe.toFixed(4)}</td>
+            <td class="num-val">${(b.iv||0).toFixed(4)}</td>
+            <td class="num-val sc-pts">${b.points>=0?'+':''}${b.points}</td>
+          </tr>`;
+        });
       }).join('');
+
       return `<div class="mdl-out-section">
-        <div class="mdl-out-title">Scorecard table</div>
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px">
+          <div class="mdl-out-title" style="margin-bottom:0">Scorecard table</div>
+          ${id ? `<button class="btn btn-ghost btn-xs${hm?' active':''}" style="margin-left:auto;font-size:10px;padding:2px 8px" onclick="Pages.models.toggleScHeatmap('${id}')">Event rate heatmap</button>` : ''}
+        </div>
         <div style="overflow-x:auto">
           <table class="sc-table">
-            <thead><tr><th>Variable</th><th>Bin</th><th>Events</th><th>Non-events</th><th>WoE</th><th>IV</th><th>Points</th></tr></thead>
+            <thead><tr><th>Variable</th><th>Bin</th><th>Events</th><th>Non-events</th><th>Event%</th><th>WoE</th><th>IV</th><th>Points</th></tr></thead>
             <tbody>${tableRows}</tbody>
           </table>
         </div>
         <div class="sc-base-row">Base points: <strong>${r.points_tables._meta?.base_pts ?? '—'}</strong> &nbsp;·&nbsp; Score range (approx): variable</div>
       </div>`;
+    },
+
+    toggleScHeatmap(id) {
+      const m = State.models.find(m=>m.id===id);
+      if (m) { m._scHeatmap = !m._scHeatmap; this.render(); }
     },
 
     _renderIVSummary(r) {
@@ -3021,7 +3054,7 @@ const Pages = {
           PDO:20, baseScore:600, baseOdds:1/19,
           varConfig:{},
         },
-        results:null, _error:null,
+        results:null, _error:null, _scHeatmap:false,
         _searchMode:false, _searchRunning:false, _searchProgress:null, _searchResults:null,
         _searchGrid:{
           maxBins:     { enabled:false, values:'3,4,5,6' },
