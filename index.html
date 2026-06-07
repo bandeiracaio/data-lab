@@ -361,6 +361,28 @@ a{color:inherit;text-decoration:none}
 .mdl-bin-detail[open] summary{color:var(--text)}
 .mdl-bin-iv{font-size:10px;color:var(--text-3);margin-left:auto}
 .mdl-bin-detail .sc-table{margin:6px 0 10px}
+/* ── Variables section ── */
+.mdl-var-row{display:flex;align-items:center;gap:6px;padding:3px 0;font-size:11px;border-bottom:1px solid var(--border)}
+.mdl-var-row:last-child{border-bottom:none}
+.mdl-var-name{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--text-2)}
+.mdl-var-row select{font-size:10px;padding:2px 4px;background:var(--surface-2);border:1px solid var(--border);border-radius:var(--radius);color:var(--text);max-width:110px}
+/* ── Apply modal ── */
+.apply-opt{display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:1px solid var(--border);font-size:12px}
+.apply-opt:last-of-type{border-bottom:none;margin-bottom:4px}
+.apply-opt label{display:flex;align-items:center;gap:6px;width:160px;flex-shrink:0;color:var(--text-2);cursor:pointer}
+.apply-opt input[type=text]{flex:1;font-size:11px;padding:3px 6px;background:var(--surface-2);border:1px solid var(--border);border-radius:var(--radius);color:var(--text)}
+.apply-opt input[type=text]:disabled{opacity:.4}
+/* ── Compare view ── */
+.mdl-compare{padding:20px;display:flex;flex-direction:column;gap:16px;overflow-y:auto}
+.mdl-compare-sel{display:flex;gap:12px;align-items:center;font-size:12px}
+.mdl-compare-sel select{font-size:12px;padding:4px 8px;background:var(--surface-2);border:1px solid var(--border);border-radius:var(--radius);color:var(--text)}
+.cmp-table{width:100%;border-collapse:collapse;font-size:12px}
+.cmp-table th{text-align:left;font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;color:var(--text-3);padding:5px 10px;border-bottom:1px solid var(--border)}
+.cmp-table td{padding:5px 10px;border-bottom:1px solid var(--border);color:var(--text-2)}
+.cmp-table tr:last-child td{border-bottom:none}
+.cmp-diff{color:var(--accent);font-weight:600}
+.cmp-section{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:14px}
+.cmp-section-title{font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.07em;color:var(--text-3);margin-bottom:10px}
 
 /* ── Modal ────────────────────────────────────────────────────────────────── */
 .modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,.65);display:none;align-items:center;justify-content:center;z-index:500;backdrop-filter:blur(3px)}
@@ -1075,18 +1097,23 @@ const DataEngine = {
   },
 
   // ── apply_model step: score each row using embedded model JSON ────────────
-  _tfApplyModel(data, columns, { model, scoreCol = '_score', probCol = '_prob' }) {
+  _tfApplyModel(data, columns, { model, writeScore=true, scoreCol='_score', writeProb=true, probCol='_prob', writeWoe=false, woePrefix='_woe_', writeBin=false, binPrefix='_bin_' }) {
     if (!model) return { data, columns };
     const result = data.map(r => {
       const s = ModelsEngine.scoreRow(r, model);
-      return { ...r, [scoreCol]: s.totalPoints, [probCol]: +s.prob.toFixed(6) };
+      const out = { ...r };
+      if (writeScore && scoreCol) out[scoreCol] = s.totalPoints;
+      if (writeProb  && probCol)  out[probCol]  = +s.prob.toFixed(6);
+      if (writeWoe   && woePrefix) for (const col of model.predictors) out[woePrefix+col] = +(s.woeValues[col]??0).toFixed(6);
+      if (writeBin   && binPrefix) for (const col of model.predictors) out[binPrefix+col]  = s.binLabels[col] ?? null;
+      return out;
     });
-    const newCols = this._reana(result, [
-      ...columns,
-      { name: scoreCol, type: 'numeric', isWeight: false },
-      { name: probCol, type: 'numeric', isWeight: false },
-    ]);
-    return { data: result, columns: newCols };
+    const extraCols = [];
+    if (writeScore && scoreCol) extraCols.push({ name:scoreCol, type:'numeric', isWeight:false });
+    if (writeProb  && probCol)  extraCols.push({ name:probCol,  type:'numeric', isWeight:false });
+    if (writeWoe   && woePrefix) for (const col of model.predictors) extraCols.push({ name:woePrefix+col, type:'numeric', isWeight:false });
+    if (writeBin   && binPrefix) for (const col of model.predictors) extraCols.push({ name:binPrefix+col, type:'categorical', isWeight:false });
+    return { data: result, columns: this._reana(result, [...columns, ...extraCols]) };
   },
 };
 
@@ -1173,14 +1200,19 @@ const ModelsEngine = {
     const woe_tables = {};
     const iv_summary = {};
 
+    const varConfig = params.varConfig || {};
+
     for (const col of predictors) {
       if (col === target || col === weightCol) continue;
       const colMeta = columns.find(c => c.name === col);
       const isCat = colMeta?.type === 'categorical';
+      // Per-variable overrides (fall back to global param)
+      const colMono = varConfig[col]?.monotonicity || monotonicity;
+      const colCatOrd = varConfig[col]?.catOrdering || catOrdering;
 
       let preBinsArr;
       if (isCat) {
-        const ordered = this.categoryOrder(trainRows, col, target, catOrdering, wFn);
+        const ordered = this.categoryOrder(trainRows, col, target, colCatOrd, wFn);
         preBinsArr = this.catPreBin(trainRows, col, target, ordered, wFn);
       } else {
         preBinsArr = this.preBin(trainRows, col, target, preBinsK, wFn);
@@ -1189,8 +1221,8 @@ const ModelsEngine = {
 
       // DP → monotonicity → WoE
       let merged = this.dpOptimize(preBinsArr, maxBins, trainE, trainNE);
-      if (!isCat && monotonicity !== 'unconstrained') {
-        merged = this.enforceMonotonicity(merged, monotonicity, trainE, trainNE);
+      if (!isCat && colMono !== 'unconstrained') {
+        merged = this.enforceMonotonicity(merged, colMono, trainE, trainNE);
       }
       let bins = this.computeWoE(merged, trainE, trainNE);
 
@@ -2659,6 +2691,7 @@ const Pages = {
   models: {
     _activeId: null,
     _running: false,
+    _compareMode: false,
 
     render() {
       const el = document.getElementById('page-models');
@@ -2680,11 +2713,15 @@ const Pages = {
               <span class="mdl-tab-close" onclick="event.stopPropagation();Pages.models.removeModel('${m.id}')">${I.x}</span>
             </button>`).join('')}
           <button class="mdl-tab-add" onclick="Pages.models.addModel('scorecard')">+ Scorecard</button>
-          ${State.models.length >= 2 ? `<button class="btn btn-ghost btn-sm mdl-compare-btn" onclick="Pages.models.compare()">Compare models</button>` : ''}
+          ${State.models.length >= 2 ? `<button class="btn btn-ghost btn-sm mdl-compare-btn${this._compareMode?' active':''}" onclick="Pages.models.compare()">${this._compareMode ? 'Back to workbench' : 'Compare models'}</button>` : ''}
         </div>
-        ${active ? this._renderWorkbench(active) : `<div class="empty-state" style="margin-top:32px"><div class="empty-title">No models yet</div><div class="empty-sub">Click "+ Scorecard" to create your first model.</div></div>`}`;
+        ${this._compareMode
+          ? this._renderCompare()
+          : active
+            ? this._renderWorkbench(active)
+            : `<div class="empty-state" style="margin-top:32px"><div class="empty-title">No models yet</div><div class="empty-sub">Click "+ Scorecard" to create your first model.</div></div>`}`;
 
-      if (active?.results) requestAnimationFrame(() => this._renderCharts(active));
+      if (!this._compareMode && active?.results) requestAnimationFrame(() => this._renderCharts(active));
     },
 
     _renderPrerequisites() {
@@ -2716,7 +2753,7 @@ const Pages = {
 
     _renderWorkbench(model) {
       return `<div class="mdl-workbench">
-        <div class="mdl-config">${this._renderSetup(model)}${this._renderParams(model)}
+        <div class="mdl-config">${this._renderSetup(model)}${this._renderVariables(model)}${this._renderParams(model)}
           <div class="mdl-run-area">
             <button class="btn btn-primary" onclick="Pages.models.runModel('${model.id}')"${this._running?' disabled':''}>
               ${model.results ? 'Re-run scorecard' : 'Run scorecard'}
@@ -2955,6 +2992,7 @@ const Pages = {
           monotonicity:'auto', catOrdering:'event_rate',
           ivThreshold:0.02, lambda:0.01, maxIter:500,
           PDO:20, baseScore:600, baseOdds:1/19,
+          varConfig:{},
         },
         results:null, _error:null,
       });
@@ -3009,14 +3047,72 @@ const Pages = {
       }, 10);
     },
 
+    // ── Per-variable config ───────────────────────────────────────────────
+    _renderVariables(model) {
+      const preds = model.params.predictors || [];
+      if (!preds.length) return '';
+      const vc = model.params.varConfig || {};
+      const id = model.id;
+      const rows = preds.map(col => {
+        const colMeta = State.columns.find(c=>c.name===col);
+        const isCat = colMeta?.type === 'categorical';
+        const typeTag = `<span style="font-size:9px;padding:1px 4px;border-radius:2px;background:var(--border);color:var(--text-3);flex-shrink:0">${isCat?'C':'N'}</span>`;
+        const override = isCat
+          ? `<select onchange="Pages.models.updateVarConfig('${id}','${Fmt.escHtml(col)}','catOrdering',this.value)" title="Category ordering for ${col}">
+              <option value="">Use global</option>
+              ${[['event_rate','Event rate'],['frequency','Frequency'],['alphabetical','Alphabetical']].map(([v,l])=>`<option value="${v}"${vc[col]?.catOrdering===v?' selected':''}>${l}</option>`).join('')}
+             </select>`
+          : `<select onchange="Pages.models.updateVarConfig('${id}','${Fmt.escHtml(col)}','monotonicity',this.value)" title="Monotonicity for ${col}">
+              <option value="">Use global</option>
+              ${[['auto','Auto'],['ascending','Ascending'],['descending','Descending'],['unconstrained','None']].map(([v,l])=>`<option value="${v}"${vc[col]?.monotonicity===v?' selected':''}>${l}</option>`).join('')}
+             </select>`;
+        return `<div class="mdl-var-row">${typeTag}<span class="mdl-var-name" title="${Fmt.escHtml(col)}">${Fmt.escHtml(col)}</span>${override}</div>`;
+      }).join('');
+      return `<div class="mdl-section">
+        <div class="mdl-section-title">Variables <span class="mdl-tip" title="Per-variable overrides for monotonicity (numeric) and category ordering (categorical). 'Use global' applies the Parameters setting.">?</span></div>
+        ${rows}
+      </div>`;
+    },
+
+    updateVarConfig(id, col, key, val) {
+      const m = State.models.find(m=>m.id===id);
+      if (!m) return;
+      if (!m.params.varConfig) m.params.varConfig = {};
+      if (!m.params.varConfig[col]) m.params.varConfig[col] = {};
+      if (val === '') delete m.params.varConfig[col][key];
+      else m.params.varConfig[col][key] = val;
+    },
+
+    // ── Apply to dataset (rich modal) ────────────────────────────────────
     applyToDataset(id) {
       const m = State.models.find(m=>m.id===id);
       if (!m?.results) return;
       const r = m.results;
-      const scoreCol = `${r.target}_score`, probCol = `${r.target}_prob`;
+      const t = r.target;
+      Modal.show('Apply model to dataset',
+        `<p style="font-size:12px;color:var(--text-2);margin:0 0 12px">Choose which columns to add to the transformed dataset. Existing columns from a previous apply of this model will be replaced.</p>
+        <div class="apply-opt"><label><input type="checkbox" id="ao-score" checked> Score (points)</label><input type="text" id="ao-score-name" value="${t}_score"></div>
+        <div class="apply-opt"><label><input type="checkbox" id="ao-prob" checked> Probability</label><input type="text" id="ao-prob-name" value="${t}_prob"></div>
+        <div class="apply-opt"><label><input type="checkbox" id="ao-woe" onchange="document.getElementById('ao-woe-pfx').disabled=!this.checked"> WoE columns</label><input type="text" id="ao-woe-pfx" value="${t}_woe_" disabled></div>
+        <div class="apply-opt"><label><input type="checkbox" id="ao-bin" onchange="document.getElementById('ao-bin-pfx').disabled=!this.checked"> Bin labels</label><input type="text" id="ao-bin-pfx" value="${t}_bin_" disabled></div>`,
+        () => this._confirmApply(id)
+      );
+    },
+
+    _confirmApply(id) {
+      const m = State.models.find(m=>m.id===id);
+      if (!m?.results) return;
+      const r = m.results;
+      const g = i => document.getElementById(i);
+      const writeScore = g('ao-score')?.checked, scoreCol = g('ao-score-name')?.value?.trim() || `${r.target}_score`;
+      const writeProb  = g('ao-prob')?.checked,  probCol  = g('ao-prob-name')?.value?.trim()  || `${r.target}_prob`;
+      const writeWoe   = g('ao-woe')?.checked,   woePrefix= g('ao-woe-pfx')?.value?.trim()   || `${r.target}_woe_`;
+      const writeBin   = g('ao-bin')?.checked,   binPrefix= g('ao-bin-pfx')?.value?.trim()   || `${r.target}_bin_`;
+      if (!writeScore && !writeProb && !writeWoe && !writeBin) { UI.toast('Select at least one output'); return; }
       const step = {
         type:'apply_model', enabled:true,
-        params:{ modelId:r.id, modelType:'scorecard', scoreCol, probCol,
+        params:{ modelId:r.id, modelType:'scorecard',
+          writeScore, scoreCol, writeProb, probCol, writeWoe, woePrefix, writeBin, binPrefix,
           model:{ type:r.type, id:r.id, target:r.target, predictors:r.predictors,
             woe_tables:r.woe_tables, coef:r.coef, intercept:r.intercept, points_tables:r.points_tables } },
       };
@@ -3024,13 +3120,115 @@ const Pages = {
       if (existing>=0) State.transforms[existing]=step;
       else State.transforms.push(step);
       DataEngine.recompute();
-      UI.toast(`Applied — columns '${scoreCol}' and '${probCol}' added to dataset`);
+      const added = [writeScore&&scoreCol, writeProb&&probCol, writeWoe&&`${woePrefix}*`, writeBin&&`${binPrefix}*`].filter(Boolean).join(', ');
+      UI.toast(`Applied — added: ${added}`);
       UI.navigate('transform');
     },
 
+    // ── Model compare ────────────────────────────────────────────────────
     compare() {
       if (State.models.length < 2) { UI.toast('Need at least 2 models to compare'); return; }
-      UI.toast('Model compare coming soon');
+      this._compareMode = !this._compareMode;
+      this._compareA = null; this._compareB = null;
+      this.render();
+    },
+
+    _renderCompare() {
+      const all = State.models;
+      const ran = all.filter(m=>m.results);
+      if (ran.length < 2) return `<div class="mdl-compare"><div class="empty-state"><div class="empty-title">Run at least 2 models first</div><div class="empty-sub">Go back to the workbench and run each model before comparing.</div></div></div>`;
+
+      const a = this._compareA || ran[0].id;
+      const b = this._compareB || ran[1].id;
+      const mA = all.find(m=>m.id===a), mB = all.find(m=>m.id===b);
+      if (!mA || !mB) return '';
+
+      const opts = ran.map(m=>`<option value="${m.id}">${Fmt.escHtml(m.name)}</option>`).join('');
+      const selA = `<select onchange="Pages.models._compareA=this.value;Pages.models.render()">${ran.map(m=>`<option value="${m.id}"${m.id===a?' selected':''}>${Fmt.escHtml(m.name)}</option>`).join('')}</select>`;
+      const selB = `<select onchange="Pages.models._compareB=this.value;Pages.models.render()">${ran.map(m=>`<option value="${m.id}"${m.id===b?' selected':''}>${Fmt.escHtml(m.name)}</option>`).join('')}</select>`;
+
+      const sameType = mA.type === mB.type;
+
+      return `<div class="mdl-compare">
+        <div class="mdl-compare-sel">${selA}<span style="color:var(--text-3)">vs</span>${selB}</div>
+        ${sameType ? this._renderParamDiff(mA, mB) : `<div class="cmp-section"><div class="cmp-section-title">Note</div><span style="font-size:12px;color:var(--text-2)">Different model types — showing metrics only.</span></div>`}
+        ${this._renderMetricsDiff(mA, mB)}
+        ${sameType ? this._renderIVDiff(mA, mB) : ''}
+      </div>`;
+    },
+
+    _renderParamDiff(mA, mB) {
+      const params = [
+        ['maxBins','Max bins'], ['preBinsK','Pre-bins'], ['monotonicity','Monotonicity'],
+        ['catOrdering','Cat. ordering'], ['ivThreshold','IV threshold'],
+        ['lambda','L2 lambda'], ['maxIter','Iterations'],
+        ['PDO','PDO'], ['baseScore','Base score'], ['baseOdds','Base odds'],
+      ];
+      const fmtParam = (k, v) => {
+        if (v == null) return '—';
+        if (k === 'baseOdds') { const f = 1/v; return Number.isInteger(Math.round(f)) ? `1/${Math.round(f)}` : v.toFixed(4); }
+        if (typeof v === 'number' && !Number.isInteger(v)) return v.toFixed(4);
+        return String(v);
+      };
+      const rows = params.map(([k, label]) => {
+        const vA = mA.params[k], vB = mB.params[k];
+        const diff = String(vA) !== String(vB);
+        return `<tr>
+          <td>${label}</td>
+          <td${diff?' class="cmp-diff"':''}>${Fmt.escHtml(fmtParam(k,vA))}</td>
+          <td${diff?' class="cmp-diff"':''}>${Fmt.escHtml(fmtParam(k,vB))}</td>
+        </tr>`;
+      }).join('');
+      const hasDiff = params.some(([k])=>String(mA.params[k])!==String(mB.params[k]));
+      return `<div class="cmp-section">
+        <div class="cmp-section-title">Parameters ${hasDiff?'<span style="color:var(--accent);font-size:10px;font-weight:400">· highlighted values differ</span>':''}</div>
+        <table class="cmp-table">
+          <thead><tr><th>Parameter</th><th>${Fmt.escHtml(mA.name)}</th><th>${Fmt.escHtml(mB.name)}</th></tr></thead>
+          <tbody>${rows}</tbody>
+        </table>
+      </div>`;
+    },
+
+    _renderMetricsDiff(mA, mB) {
+      const splits = [...new Set([...Object.keys(mA.results?.metrics||{}), ...Object.keys(mB.results?.metrics||{})])];
+      const fmt4 = v => v==null?'—':v.toFixed(4);
+      const fmtPct = v => v==null?'—':(v*100).toFixed(2)+'%';
+      const rows = splits.flatMap(split => [
+        ['Gini', split, v=>fmt4(v?.gini)],
+        ['AUC',  split, v=>fmt4(v?.auc)],
+        ['KS',   split, v=>fmtPct(v?.ks)],
+      ].map(([metric, s, fn]) => {
+        const vA = fn(mA.results?.metrics?.[s]), vB = fn(mB.results?.metrics?.[s]);
+        return `<tr><td>${metric} (${s})</td><td>${vA}</td><td>${vB}</td></tr>`;
+      })).join('');
+      return `<div class="cmp-section">
+        <div class="cmp-section-title">Performance metrics</div>
+        <table class="cmp-table">
+          <thead><tr><th>Metric</th><th>${Fmt.escHtml(mA.name)}</th><th>${Fmt.escHtml(mB.name)}</th></tr></thead>
+          <tbody>${rows}</tbody>
+        </table>
+      </div>`;
+    },
+
+    _renderIVDiff(mA, mB) {
+      const allCols = [...new Set([...(mA.results?.allPredictors||[]), ...(mB.results?.allPredictors||[])])];
+      if (!allCols.length) return '';
+      const rows = allCols.map(col => {
+        const ivA = mA.results?.iv_summary?.[col], ivB = mB.results?.iv_summary?.[col];
+        const inA = mA.results?.predictors?.includes(col), inB = mB.results?.predictors?.includes(col);
+        return `<tr>
+          <td>${Fmt.escHtml(col)}</td>
+          <td>${ivA!=null?ivA.toFixed(4):'—'} ${inA?'':'<span style="font-size:9px;color:var(--text-3)">(excl.)</span>'}</td>
+          <td>${ivB!=null?ivB.toFixed(4):'—'} ${inB?'':'<span style="font-size:9px;color:var(--text-3)">(excl.)</span>'}</td>
+        </tr>`;
+      }).join('');
+      return `<div class="cmp-section">
+        <div class="cmp-section-title">Information Value by variable</div>
+        <table class="cmp-table">
+          <thead><tr><th>Variable</th><th>${Fmt.escHtml(mA.name)}</th><th>${Fmt.escHtml(mB.name)}</th></tr></thead>
+          <tbody>${rows}</tbody>
+        </table>
+      </div>`;
     },
   },
 
