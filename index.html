@@ -309,6 +309,58 @@ a{color:inherit;text-decoration:none}
 .ms-ratio-row label{font-size:11px;color:var(--text-2);width:70px;flex-shrink:0}
 .ms-ratio-row input{flex:1}
 .ms-ratio-preview{font-size:11px;color:var(--text-3);margin-top:4px}
+/* ── Workbench tabs ── */
+.mdl-tabs-bar{display:flex;align-items:center;gap:2px;border-bottom:1px solid var(--border);margin-bottom:0;padding:0 4px;flex-wrap:wrap}
+.mdl-tab{background:none;border:none;border-bottom:2px solid transparent;padding:7px 12px 6px;font-size:12px;color:var(--text-2);cursor:pointer;display:flex;align-items:center;gap:6px;border-radius:var(--radius) var(--radius) 0 0;transition:color .15s}
+.mdl-tab:hover{color:var(--text);background:var(--surface)}
+.mdl-tab.active{color:var(--text);border-bottom-color:var(--accent)}
+.mdl-tab-close{opacity:.5;line-height:1;padding:0 2px;display:flex;align-items:center}
+.mdl-tab-close:hover{opacity:1}
+.mdl-tab-add{background:none;border:none;padding:7px 10px;font-size:12px;color:var(--text-3);cursor:pointer;border-radius:var(--radius) var(--radius) 0 0}
+.mdl-tab-add:hover{color:var(--accent);background:var(--surface)}
+.mdl-compare-btn{margin-left:auto;margin-right:4px;align-self:center}
+/* ── Workbench layout ── */
+.mdl-workbench{display:flex;gap:0;height:calc(100vh - 120px);min-height:400px;overflow:hidden}
+.mdl-config{width:268px;flex-shrink:0;border-right:1px solid var(--border);overflow-y:auto;padding:0}
+.mdl-outputs{flex:1;min-width:0;overflow-y:auto;padding:16px;display:flex;flex-direction:column;gap:14px}
+.mdl-section{padding:12px 14px;border-bottom:1px solid var(--border)}
+.mdl-section-title{font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.07em;color:var(--text-3);margin-bottom:10px}
+.mdl-field{display:flex;align-items:flex-start;gap:6px;margin-bottom:8px;font-size:12px}
+.mdl-field label{width:96px;flex-shrink:0;color:var(--text-2);padding-top:4px;line-height:1.3}
+.mdl-field select,.mdl-field input[type=number]{flex:1;min-width:0;font-size:11px;padding:4px 6px;background:var(--surface-2);border:1px solid var(--border);border-radius:var(--radius);color:var(--text)}
+.mdl-tip{display:inline-flex;align-items:center;justify-content:center;width:14px;height:14px;border-radius:50%;border:1px solid var(--border);color:var(--text-3);font-size:9px;font-weight:700;cursor:help;flex-shrink:0;margin-left:2px;vertical-align:middle}
+.mdl-pred-list{flex:1;min-width:0;max-height:180px;overflow-y:auto;border:1px solid var(--border);border-radius:var(--radius);background:var(--surface-2);padding:4px 0}
+.mdl-pred-item{display:flex;align-items:center;gap:5px;padding:3px 8px;font-size:11px;color:var(--text-2);cursor:pointer;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.mdl-pred-item:hover{background:var(--surface-3,var(--surface))}
+.mdl-pred-item input{flex-shrink:0}
+.mdl-run-area{padding:12px 14px;display:flex;flex-direction:column;gap:8px}
+.mdl-error{font-size:11px;color:var(--danger);background:var(--danger)18;border:1px solid var(--danger)33;border-radius:var(--radius);padding:6px 8px;line-height:1.4}
+/* ── Output sections ── */
+.mdl-out-section{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:14px}
+.mdl-out-title{font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.07em;color:var(--text-3);margin-bottom:10px}
+.mdl-metrics-table{border-collapse:collapse;font-size:12px}
+.mdl-metrics-table th{text-align:left;font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;color:var(--text-3);padding:4px 10px;border-bottom:1px solid var(--border)}
+.mdl-metrics-table td{padding:5px 10px;border-bottom:1px solid var(--border);color:var(--text-2)}
+.mdl-metrics-table td:first-child{text-transform:capitalize}
+.mdl-metrics-table tr:last-child td{border-bottom:none}
+/* ── Scorecard table ── */
+.sc-table{width:100%;border-collapse:collapse;font-size:11px}
+.sc-table th{text-align:left;font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;color:var(--text-3);padding:5px 8px;border-bottom:1px solid var(--border);white-space:nowrap}
+.sc-table td{padding:4px 8px;border-bottom:1px solid var(--border);color:var(--text-2);vertical-align:top}
+.sc-table tr:last-child td{border-bottom:none}
+.sc-var-cell{font-weight:600;color:var(--text);background:var(--surface-2,var(--surface));border-right:1px solid var(--border);vertical-align:top;padding-top:6px !important;white-space:nowrap}
+.sc-pos{color:var(--success)}
+.sc-neg{color:var(--danger)}
+.sc-pts{font-weight:600;color:var(--text)}
+.sc-null-row td{opacity:.7;font-style:italic}
+.sc-base-row{font-size:11px;color:var(--text-3);margin-top:8px;text-align:right}
+/* ── Binning detail ── */
+.mdl-bin-detail{border-top:1px solid var(--border);margin-top:-1px}
+.mdl-bin-detail summary{padding:8px 4px;font-size:12px;cursor:pointer;color:var(--text-2);user-select:none;display:flex;align-items:center;gap:8px}
+.mdl-bin-detail summary:hover{color:var(--text)}
+.mdl-bin-detail[open] summary{color:var(--text)}
+.mdl-bin-iv{font-size:10px;color:var(--text-3);margin-left:auto}
+.mdl-bin-detail .sc-table{margin:6px 0 10px}
 
 /* ── Modal ────────────────────────────────────────────────────────────────── */
 .modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,.65);display:none;align-items:center;justify-content:center;z-index:500;backdrop-filter:blur(3px)}
@@ -740,6 +792,7 @@ const DataEngine = {
       case 'drop':          return this._tfDrop(data, columns, step.params);
       case 'null_handling': return this._tfNullHandling(data, columns, step.params);
       case 'model_split':   return this._tfModelSplit(data, columns, step.params);
+      case 'apply_model':   return this._tfApplyModel(data, columns, step.params);
       default: return { data, columns };
     }
   },
@@ -1019,6 +1072,21 @@ const DataEngine = {
     const rand = () => { s = Math.imul(s ^ (s >>> 15), s | 1) ^ Math.imul(s ^ (s << 7), s | 61); return ((s ^ (s >>> 14)) >>> 0) / 0x100000000; };
     for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(rand() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; }
     return a;
+  },
+
+  // ── apply_model step: score each row using embedded model JSON ────────────
+  _tfApplyModel(data, columns, { model, scoreCol = '_score', probCol = '_prob' }) {
+    if (!model) return { data, columns };
+    const result = data.map(r => {
+      const s = ModelsEngine.scoreRow(r, model);
+      return { ...r, [scoreCol]: s.totalPoints, [probCol]: +s.prob.toFixed(6) };
+    });
+    const newCols = this._reana(result, [
+      ...columns,
+      { name: scoreCol, type: 'numeric', isWeight: false },
+      { name: probCol, type: 'numeric', isWeight: false },
+    ]);
+    return { data: result, columns: newCols };
   },
 };
 
@@ -2255,7 +2323,7 @@ const Pages = {
         case 'drop':          return p.col;
         case 'null_handling': return (p.actions||[]).map(a=>`${a.col}:${a.strategy}`).join(', ') || 'no actions';
         case 'model_split':   return `${p.strategy||'random'} · ${p.train??70}/${p.validation??15}/${100-(p.train??70)-(p.validation??15)}% → ${p.outputCol||'_split'}`;
-        case 'apply_model':   return p.modelName || 'model';
+        case 'apply_model':   return `→ ${p.scoreCol||'_score'}, ${p.probCol||'_prob'}`;
         default: return '';
       }
     },
@@ -2589,51 +2657,380 @@ const Pages = {
 
   // ── Models ────────────────────────────────────────────────────────────────
   models: {
+    _activeId: null,
+    _running: false,
+
     render() {
       const el = document.getElementById('page-models');
       if (!State.rawData) {
         el.innerHTML = `<div class="empty-state"><div class="empty-title">No dataset loaded</div><div class="empty-sub">Load a CSV from the Overview page first.</div></div>`;
         return;
       }
+      // Sync active tab
+      if (!this._activeId || !State.models.find(m => m.id === this._activeId))
+        this._activeId = State.models[0]?.id || null;
+      const active = State.models.find(m => m.id === this._activeId);
+
       el.innerHTML = `
         ${this._renderPrerequisites()}
-        <div class="empty-state" style="margin-top:32px">
-          <div class="empty-title">Model workbench</div>
-          <div class="empty-sub">Scorecard and other models coming in the next build phase.</div>
-        </div>`;
+        <div class="mdl-tabs-bar">
+          ${State.models.map(m => `
+            <button class="mdl-tab${m.id===this._activeId?' active':''}" onclick="Pages.models.setActive('${m.id}')">
+              ${Fmt.escHtml(m.name)}
+              <span class="mdl-tab-close" onclick="event.stopPropagation();Pages.models.removeModel('${m.id}')">${I.x}</span>
+            </button>`).join('')}
+          <button class="mdl-tab-add" onclick="Pages.models.addModel('scorecard')">+ Scorecard</button>
+          ${State.models.length >= 2 ? `<button class="btn btn-ghost btn-sm mdl-compare-btn" onclick="Pages.models.compare()">Compare models</button>` : ''}
+        </div>
+        ${active ? this._renderWorkbench(active) : `<div class="empty-state" style="margin-top:32px"><div class="empty-title">No models yet</div><div class="empty-sub">Click "+ Scorecard" to create your first model.</div></div>`}`;
+
+      if (active?.results) requestAnimationFrame(() => this._renderCharts(active));
     },
 
     _renderPrerequisites() {
-      // Check null handling steps applied
       const nhSteps = State.transforms.filter(s => s.type === 'null_handling' && s.enabled !== false);
       const handledCols = nhSteps.flatMap(s => (s.params.actions || []).map(a => a.col));
       const nullCols = State.columns.filter(c => c.nullCount > 0 && !c.isWeight);
+      const splitCol = State.columns.find(c => c.name === '_split') ||
+        State.transforms.find(s => s.type === 'model_split' && s.enabled !== false);
 
-      // Check for split column
-      const splitCol = State.columns.find(c => c.name === '_split' || State.transforms.some(s => s.type === 'model_split' && s.enabled !== false && s.params.outputCol === c.name));
-
-      const teleportBtn = (stepType, label) =>
+      const tb = (stepType, label) =>
         `<button class="btn btn-ghost btn-sm" style="margin-left:auto;flex-shrink:0"
           onclick="UI.navigate('transform');setTimeout(()=>Pages.transform.openModal('${stepType}',null),120)">${label} →</button>`;
 
       const nullItem = nullCols.length === 0
-        ? `<div class="mdl-prereq-item ok"><span class="mdl-prereq-icon">✓</span><span>No missing values detected</span></div>`
+        ? `<div class="mdl-prereq-item ok"><span class="mdl-prereq-icon">✓</span><span>No missing values</span></div>`
         : handledCols.length
           ? `<div class="mdl-prereq-item ok"><span class="mdl-prereq-icon">✓</span><span>Null handling applied — ${handledCols.map(Fmt.escHtml).join(', ')}</span></div>`
           : `<div class="mdl-prereq-item warn"><span class="mdl-prereq-icon">!</span>
               <span>${nullCols.length} column${nullCols.length>1?'s':''} with nulls — not handled (${nullCols.map(c=>Fmt.escHtml(c.name)).join(', ')})</span>
-              ${teleportBtn('null_handling','Set up null handling')}</div>`;
+              ${tb('null_handling','Set up null handling')}</div>`;
 
       const splitItem = splitCol
-        ? `<div class="mdl-prereq-item ok"><span class="mdl-prereq-icon">✓</span><span>Split column detected — train/validation/test splits available</span></div>`
+        ? `<div class="mdl-prereq-item ok"><span class="mdl-prereq-icon">✓</span><span>Split column present — train/validation/test metrics available</span></div>`
         : `<div class="mdl-prereq-item warn"><span class="mdl-prereq-icon">!</span>
-            <span>No split column — model will train on full data, in-sample metrics only</span>
-            ${teleportBtn('model_split','Set up split')}</div>`;
+            <span>No split column — full-data metrics only</span>${tb('model_split','Set up split')}</div>`;
 
-      return `<div class="mdl-prereq">
-        <div class="mdl-prereq-title">Data preparation</div>
-        ${nullItem}${splitItem}
+      return `<div class="mdl-prereq"><div class="mdl-prereq-title">Data preparation</div>${nullItem}${splitItem}</div>`;
+    },
+
+    _renderWorkbench(model) {
+      return `<div class="mdl-workbench">
+        <div class="mdl-config">${this._renderSetup(model)}${this._renderParams(model)}
+          <div class="mdl-run-area">
+            <button class="btn btn-primary" onclick="Pages.models.runModel('${model.id}')"${this._running?' disabled':''}>
+              ${model.results ? 'Re-run scorecard' : 'Run scorecard'}
+            </button>
+            ${model.results ? `<button class="btn btn-ghost btn-sm" onclick="Pages.models.applyToDataset('${model.id}')">Apply to dataset</button>` : ''}
+            ${model._error ? `<div class="mdl-error">${Fmt.escHtml(model._error)}</div>` : ''}
+          </div>
+        </div>
+        <div class="mdl-outputs">
+          ${model.results ? this._renderOutputs(model) : `<div class="empty-state"><div class="empty-title">Ready to run</div><div class="empty-sub">Select a target and predictors, then click Run scorecard.</div></div>`}
+        </div>
       </div>`;
+    },
+
+    _renderSetup(model) {
+      const cols = State.columns.filter(c => !c.isWeight);
+      const p = model.params;
+      const targetOpts = cols.map(c =>
+        `<option value="${Fmt.escHtml(c.name)}"${c.name===p.target?' selected':''}>${Fmt.escHtml(c.name)}</option>`).join('');
+      const predList = cols.filter(c => c.name !== p.target).map(c => {
+        const chk = (p.predictors||[]).includes(c.name) ? ' checked' : '';
+        return `<label class="mdl-pred-item">
+          <input type="checkbox"${chk} onchange="Pages.models.togglePredictor('${model.id}','${Fmt.escHtml(c.name)}',this.checked)">
+          <span style="font-size:9px;padding:1px 4px;border-radius:2px;background:var(--border);color:var(--text-3);flex-shrink:0">${c.type==='numeric'?'N':'C'}</span>
+          ${Fmt.escHtml(c.name)}${c.nullCount>0?` <span style="color:var(--warn);font-size:9px">(${c.nullCount} null)</span>`:''}
+        </label>`;
+      }).join('');
+      return `<div class="mdl-section">
+        <div class="mdl-section-title">Setup</div>
+        <div class="mdl-field">
+          <label>Target <span class="mdl-tip" title="Binary column (0/1). Event = 1. Only rows with 0 or 1 are used.">?</span></label>
+          <select onchange="Pages.models.updateParam('${model.id}','target',this.value)">
+            <option value="">— select —</option>${targetOpts}
+          </select>
+        </div>
+        <div class="mdl-field" style="align-items:flex-start">
+          <label style="padding-top:6px">Predictors</label>
+          <div style="flex:1;min-width:0">
+            <div class="mdl-pred-list">${predList}</div>
+            <div style="display:flex;gap:4px;margin-top:4px">
+              <button class="btn btn-ghost btn-xs" style="font-size:10px;padding:2px 6px" onclick="Pages.models.selectAllPreds('${model.id}',true)">All</button>
+              <button class="btn btn-ghost btn-xs" style="font-size:10px;padding:2px 6px" onclick="Pages.models.selectAllPreds('${model.id}',false)">None</button>
+            </div>
+          </div>
+        </div>
+      </div>`;
+    },
+
+    _renderParams(model) {
+      const p = model.params;
+      const id = model.id;
+      const sel = (key, opts, tip) => {
+        const selHtml = `<select onchange="Pages.models.updateParam('${id}','${key}',this.value)">
+          ${opts.map(([v,l])=>`<option value="${v}"${String(p[key])===String(v)?' selected':''}>${l}</option>`).join('')}
+        </select>`;
+        return selHtml;
+      };
+      const num = (key, attrs, tip) =>
+        `<input type="number" value="${p[key]}" ${attrs} onchange="Pages.models.updateParam('${id}','${key}',Number(this.value))">`;
+      const field = (label, tip, input) =>
+        `<div class="mdl-field"><label>${label} <span class="mdl-tip" title="${tip}">?</span></label>${input}</div>`;
+
+      return `<div class="mdl-section">
+        <div class="mdl-section-title">Parameters</div>
+        ${field('Max bins','Max bins per predictor after DP optimization. Fewer = simpler scorecard, less overfit. Typical: 3–6.',num('maxBins','min="2" max="20" step="1"'))}
+        ${field('Pre-bins','Initial quantile bins before DP (K). Higher = finer granularity. 15–25 is usually sufficient.',num('preBinsK','min="5" max="50" step="1"'))}
+        ${field('Monotonicity','WoE direction constraint. Auto tries ascending and descending, picks highest IV. Applies to numeric predictors only.',sel('monotonicity',[['auto','Auto'],['ascending','Ascending'],['descending','Descending'],['unconstrained','None']]))}
+        ${field('Cat. ordering','How categories are sorted before binning. Event rate (ascending) is recommended for monotone WoE.',sel('catOrdering',[['event_rate','Event rate'],['frequency','Frequency'],['alphabetical','Alphabetical']]))}
+        ${field('IV threshold','Predictors below this IV are excluded. < 0.02 useless · 0.02–0.1 weak · 0.1–0.3 moderate · > 0.3 strong.',num('ivThreshold','min="0" max="1" step="0.01"'))}
+        ${field('L2 lambda','Regularization strength for logistic regression on WoE-compressed data. Higher = smaller coefficients.',num('lambda','min="0.0001" max="10" step="0.001"'))}
+        ${field('Iterations','Max gradient descent iterations for LR fitting. 300–500 typically converges.',num('maxIter','min="50" max="2000" step="50"'))}
+        ${field('PDO','Points to Double the Odds. A 20-pt drop in score = 2× event odds. Industry standard: 20–40.',num('PDO','min="5" max="80" step="5"'))}
+        ${field('Base score','Score at base odds. 600–700 is typical in credit scoring.',num('baseScore','min="100" max="1000" step="10"'))}
+        ${field('Base odds','Reference odds (events/non-events) at base score. E.g. 1/19 ≈ 5% event rate.',num('baseOdds','min="0.001" max="10" step="0.001"'))}
+      </div>`;
+    },
+
+    _renderOutputs(model) {
+      const r = model.results;
+      if (!r) return '';
+      return `${this._renderPerformance(r)}${this._renderScorecardTable(r)}${this._renderIVSummary(r)}${this._renderBinningDetail(r)}`;
+    },
+
+    _renderPerformance(r) {
+      const fmt4 = v => v==null ? '—' : v.toFixed(4);
+      const fmtPct = v => v==null ? '—' : (v*100).toFixed(2)+'%';
+      const rows = Object.entries(r.metrics).map(([split, m]) =>
+        `<tr><td>${split}</td><td>${fmt4(m.gini)}</td><td>${fmt4(m.auc)}</td><td>${fmtPct(m.ks)}</td></tr>`).join('');
+      return `<div class="mdl-out-section">
+        <div class="mdl-out-title">Performance</div>
+        <div style="display:flex;gap:16px;flex-wrap:wrap;align-items:flex-start">
+          <table class="mdl-metrics-table">
+            <thead><tr><th>Split</th><th>Gini</th><th>AUC</th><th>KS</th></tr></thead>
+            <tbody>${rows}</tbody>
+          </table>
+          <div id="mdl-roc-${r.id}" style="flex:1;min-width:220px;height:200px"></div>
+        </div>
+        <div id="mdl-hist-${r.id}" style="width:100%;height:150px;margin-top:8px"></div>
+      </div>`;
+    },
+
+    _renderScorecardTable(r) {
+      const tableRows = r.predictors.flatMap(col => {
+        const bins = (r.points_tables[col] || []).filter(b => !b.isNull || b.events > 0);
+        return bins.map((b, i) => `<tr${b.isNull?' class="sc-null-row"':''}>
+          ${i===0 ? `<td rowspan="${bins.length}" class="sc-var-cell">${Fmt.escHtml(col)}<br><span style="font-size:9px;color:var(--text-3)">IV ${(r.iv_summary[col]||0).toFixed(3)}</span></td>` : ''}
+          <td>${Fmt.escHtml(b.label)}</td>
+          <td class="num-val">${b.events.toFixed(1)}</td>
+          <td class="num-val">${b.nonevents.toFixed(1)}</td>
+          <td class="num-val ${b.woe>0?'sc-pos':b.woe<0?'sc-neg':''}">${b.woe.toFixed(4)}</td>
+          <td class="num-val">${(b.iv||0).toFixed(4)}</td>
+          <td class="num-val sc-pts">${b.points>=0?'+':''}${b.points}</td>
+        </tr>`);
+      }).join('');
+      return `<div class="mdl-out-section">
+        <div class="mdl-out-title">Scorecard table</div>
+        <div style="overflow-x:auto">
+          <table class="sc-table">
+            <thead><tr><th>Variable</th><th>Bin</th><th>Events</th><th>Non-events</th><th>WoE</th><th>IV</th><th>Points</th></tr></thead>
+            <tbody>${tableRows}</tbody>
+          </table>
+        </div>
+        <div class="sc-base-row">Base points: <strong>${r.points_tables._meta?.base_pts ?? '—'}</strong> &nbsp;·&nbsp; Score range (approx): variable</div>
+      </div>`;
+    },
+
+    _renderIVSummary(r) {
+      const allPreds = r.allPredictors || r.predictors;
+      return `<div class="mdl-out-section">
+        <div class="mdl-out-title">Variable importance (Information Value)</div>
+        <div id="mdl-iv-${r.id}" style="width:100%;height:${Math.max(120, allPreds.length*26+60)}px"></div>
+      </div>`;
+    },
+
+    _renderBinningDetail(r) {
+      const sections = r.predictors.map(col => {
+        const bins = r.woe_tables[col] || [];
+        const rows = bins.map(b => `<tr>
+          <td>${Fmt.escHtml(b.label)}</td>
+          <td class="num-val">${b.events.toFixed(1)}</td>
+          <td class="num-val">${b.nonevents.toFixed(1)}</td>
+          <td class="num-val">${b.weight.toFixed(1)}</td>
+          <td class="num-val">${b.weight>0?(b.events/b.weight*100).toFixed(1)+'%':'—'}</td>
+          <td class="num-val ${b.woe>0?'sc-pos':b.woe<0?'sc-neg':''}">${b.woe.toFixed(4)}</td>
+          <td class="num-val">${(b.iv||0).toFixed(4)}</td>
+        </tr>`).join('');
+        return `<details class="mdl-bin-detail">
+          <summary>${Fmt.escHtml(col)}<span class="mdl-bin-iv">IV: ${(r.iv_summary[col]||0).toFixed(3)} · ${bins.filter(b=>!b.isNull).length} bins${bins.some(b=>b.isNull)?' + null':''}</span></summary>
+          <table class="sc-table" style="margin:6px 0 10px"><thead><tr><th>Bin</th><th>Events</th><th>Non-events</th><th>Total</th><th>Event%</th><th>WoE</th><th>IV</th></tr></thead>
+          <tbody>${rows}</tbody></table>
+        </details>`;
+      }).join('');
+      return `<div class="mdl-out-section">
+        <div class="mdl-out-title">Binning detail</div>${sections}
+      </div>`;
+    },
+
+    _renderCharts(model) {
+      const r = model.results;
+      if (!r) return;
+      const css = v => Charts._css(v);
+      const accent = css('--accent'), text2 = css('--text-2'), border = css('--border');
+      const cfg = { displayModeBar: false, responsive: true };
+      const baseLayout = {
+        paper_bgcolor:'transparent', plot_bgcolor:'transparent',
+        font:{ color:text2, size:10, family:'-apple-system,sans-serif' },
+        xaxis:{ gridcolor:border, zerolinecolor:border },
+        yaxis:{ gridcolor:border, zerolinecolor:border },
+      };
+
+      // ── ROC curve ──
+      const rocEl = document.getElementById(`mdl-roc-${r.id}`);
+      if (rocEl) {
+        const tModel = { predictors:r.predictors, woe_tables:r.woe_tables, coef:r.coef, intercept:r.intercept };
+        const target = r.params.target || r.target;
+        const scored = State.data
+          .filter(row => { const t=Number(row[target]); return t===0||t===1; })
+          .map(row => ({ t:Number(row[target]), p:ModelsEngine.predictProba(row, tModel) }))
+          .sort((a,b) => b.p - a.p);
+        const totE = scored.reduce((s,x)=>s+x.t,0), totNE=scored.length-totE;
+        let cE=0,cNE=0; const tprs=[0],fprs=[0];
+        for(const s of scored){ cE+=s.t; cNE+=1-s.t; tprs.push(cE/totE); fprs.push(cNE/totNE); }
+        const auc = (r.metrics.full||r.metrics.train||{}).auc;
+        Plotly.newPlot(rocEl,[
+          {x:[0,1],y:[0,1],mode:'lines',line:{color:border,dash:'dash',width:1},showlegend:false,hoverinfo:'skip'},
+          {x:fprs,y:tprs,mode:'lines',line:{color:accent,width:2},name:`AUC ${auc?.toFixed(3)||'—'}`,fill:'tozeroy',fillcolor:accent+'22'},
+        ],{...baseLayout,xaxis:{...baseLayout.xaxis,title:'FPR',range:[0,1]},yaxis:{...baseLayout.yaxis,title:'TPR',range:[0,1]},
+          legend:{x:0.4,y:0.08,font:{size:10}},margin:{l:40,r:8,t:8,b:40}},cfg);
+      }
+
+      // ── Score histogram ──
+      const histEl = document.getElementById(`mdl-hist-${r.id}`);
+      if (histEl) {
+        const target = r.params.target || r.target;
+        const events=[], nonevents=[];
+        for(const row of State.data){
+          const t=Number(row[target]); if(t!==0&&t!==1) continue;
+          const s = ModelsEngine.scoreRow(row, {predictors:r.predictors, points_tables:r.points_tables});
+          if(t===1) events.push(s.totalPoints); else nonevents.push(s.totalPoints);
+        }
+        Plotly.newPlot(histEl,[
+          {x:events,type:'histogram',name:'Event (1)',marker:{color:accent+'cc'},opacity:.7},
+          {x:nonevents,type:'histogram',name:'Non-event (0)',marker:{color:border},opacity:.7},
+        ],{...baseLayout,barmode:'overlay',legend:{x:.7,y:.95,font:{size:10}},margin:{l:36,r:8,t:4,b:36}},cfg);
+      }
+
+      // ── IV bar chart ──
+      const ivEl = document.getElementById(`mdl-iv-${r.id}`);
+      if (ivEl) {
+        const allPreds = (r.allPredictors||r.predictors).slice();
+        const sorted = allPreds.map(col=>({ col, iv:r.iv_summary[col]||0, used:r.predictors.includes(col) }))
+          .sort((a,b)=>a.iv-b.iv);
+        Plotly.newPlot(ivEl,[{
+          x:sorted.map(s=>s.iv), y:sorted.map(s=>s.col), type:'bar', orientation:'h',
+          marker:{ color:sorted.map(s=>s.used?accent:border) },
+          text:sorted.map(s=>s.iv.toFixed(3)), textposition:'outside',
+        }],{
+          ...baseLayout,
+          xaxis:{...baseLayout.xaxis,title:'Information Value'},
+          margin:{l:90,r:60,t:4,b:36},
+          shapes:[{type:'line',x0:0.02,x1:0.02,y0:-0.5,y1:sorted.length-0.5,line:{color:'orange',dash:'dot',width:1}}],
+        },cfg);
+      }
+    },
+
+    // ── Model management ───────────────────────────────────────────────────
+    addModel(type) {
+      const n = State.models.filter(m=>m.type===type).length + 1;
+      const id = '_mdl_' + Math.random().toString(36).slice(2,8);
+      State.models.push({
+        type, id,
+        name: type==='scorecard' ? `Scorecard ${n}` : `Model ${n}`,
+        params:{
+          target:'', predictors:[],
+          maxBins:5, preBinsK:20, minBinSize:0.05,
+          monotonicity:'auto', catOrdering:'event_rate',
+          ivThreshold:0.02, lambda:0.01, maxIter:500,
+          PDO:20, baseScore:600, baseOdds:1/19,
+        },
+        results:null, _error:null,
+      });
+      this._activeId = id;
+      this.render();
+    },
+
+    removeModel(id) {
+      State.models = State.models.filter(m=>m.id!==id);
+      if (this._activeId===id) this._activeId = State.models[0]?.id||null;
+      this.render();
+    },
+
+    setActive(id) { this._activeId=id; this.render(); },
+
+    updateParam(id, key, val) {
+      const m = State.models.find(m=>m.id===id);
+      if (m) m.params[key] = val;
+    },
+
+    togglePredictor(id, col, checked) {
+      const m = State.models.find(m=>m.id===id);
+      if (!m) return;
+      if (checked && !m.params.predictors.includes(col)) m.params.predictors.push(col);
+      else m.params.predictors = m.params.predictors.filter(c=>c!==col);
+    },
+
+    selectAllPreds(id, all) {
+      const m = State.models.find(m=>m.id===id);
+      if (!m) return;
+      m.params.predictors = all ? State.columns.filter(c=>!c.isWeight&&c.name!==m.params.target).map(c=>c.name) : [];
+      this.render();
+    },
+
+    runModel(id) {
+      const m = State.models.find(m=>m.id===id);
+      if (!m) return;
+      if (!m.params.target) { UI.toast('Select a target column first'); return; }
+      if (!m.params.predictors.length) { UI.toast('Select at least one predictor'); return; }
+      this._running = true; m._error = null;
+      this.render();
+      setTimeout(() => {
+        try {
+          m.results = ModelsEngine.runScorecard({ ...m.params, data:State.data, columns:State.columns, weightCol:State.weightCol });
+          m._error = null;
+        } catch(e) {
+          m._error = e.message; m.results = null;
+          console.error('Scorecard error:', e);
+        }
+        this._running = false;
+        this.render();
+      }, 10);
+    },
+
+    applyToDataset(id) {
+      const m = State.models.find(m=>m.id===id);
+      if (!m?.results) return;
+      const r = m.results;
+      const scoreCol = `${r.target}_score`, probCol = `${r.target}_prob`;
+      const step = {
+        type:'apply_model', enabled:true,
+        params:{ modelId:r.id, modelType:'scorecard', scoreCol, probCol,
+          model:{ type:r.type, id:r.id, target:r.target, predictors:r.predictors,
+            woe_tables:r.woe_tables, coef:r.coef, intercept:r.intercept, points_tables:r.points_tables } },
+      };
+      const existing = State.transforms.findIndex(s=>s.type==='apply_model'&&s.params.modelId===r.id);
+      if (existing>=0) State.transforms[existing]=step;
+      else State.transforms.push(step);
+      DataEngine.recompute();
+      UI.toast(`Applied — columns '${scoreCol}' and '${probCol}' added to dataset`);
+      UI.navigate('transform');
+    },
+
+    compare() {
+      if (State.models.length < 2) { UI.toast('Need at least 2 models to compare'); return; }
+      UI.toast('Model compare coming soon');
     },
   },
 
