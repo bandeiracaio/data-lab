@@ -384,6 +384,29 @@ a{color:inherit;text-decoration:none}
 .cmp-section{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:14px}
 .cmp-section-title{font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.07em;color:var(--text-3);margin-bottom:10px}
 
+/* ── Parameter search ─────────────────────────────────────────────────────── */
+.srch-layout{display:flex;height:calc(100vh - 120px);overflow:hidden}
+.srch-cfg{width:268px;flex-shrink:0;border-right:1px solid var(--border);overflow-y:auto}
+.srch-cfg-section{padding:12px 14px;border-bottom:1px solid var(--border)}
+.srch-cfg-title{font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.07em;color:var(--text-3);margin-bottom:10px}
+.srch-grid-row{display:flex;align-items:center;gap:6px;padding:4px 0;font-size:11px}
+.srch-grid-row label{display:flex;align-items:center;gap:5px;min-width:90px;flex-shrink:0;cursor:pointer;color:var(--text-2)}
+.srch-grid-vals{flex:1;min-width:0;font-size:11px;padding:3px 5px;background:var(--surface-2);border:1px solid var(--border);border-radius:var(--radius);color:var(--text)}
+.srch-grid-vals:disabled{opacity:.35}
+.srch-results{flex:1;min-width:0;overflow-y:auto;padding:16px;display:flex;flex-direction:column;gap:14px}
+.srch-progress-wrap{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:12px 14px}
+.srch-progress-bar{height:4px;background:var(--border);border-radius:2px;overflow:hidden;margin:8px 0 4px}
+.srch-progress-fill{height:100%;background:var(--accent);border-radius:2px;transition:width .15s}
+.srch-progress-text{font-size:11px;color:var(--text-2)}
+.srch-table-wrap{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:14px}
+.srch-table{width:100%;border-collapse:collapse;font-size:11px}
+.srch-table th{text-align:left;font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;color:var(--text-3);padding:4px 8px;border-bottom:1px solid var(--border);white-space:nowrap}
+.srch-table td{padding:4px 8px;border-bottom:1px solid var(--border);color:var(--text-2);white-space:nowrap}
+.srch-table tr:last-child td{border-bottom:none}
+.srch-row-best td{background:var(--accent-dim)!important;color:var(--text)!important}
+.srch-apply-btn{font-size:10px;padding:2px 6px;border:1px solid var(--border);border-radius:2px;background:none;color:var(--text-2);cursor:pointer}
+.srch-apply-btn:hover{background:var(--accent);color:var(--accent-text);border-color:var(--accent)}
+
 /* ── Modal ────────────────────────────────────────────────────────────────── */
 .modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,.65);display:none;align-items:center;justify-content:center;z-index:500;backdrop-filter:blur(3px)}
 .modal-overlay.open{display:flex}
@@ -2714,14 +2737,18 @@ const Pages = {
             </button>`).join('')}
           <button class="mdl-tab-add" onclick="Pages.models.addModel('scorecard')">+ Scorecard</button>
           ${State.models.length >= 2 ? `<button class="btn btn-ghost btn-sm mdl-compare-btn${this._compareMode?' active':''}" onclick="Pages.models.compare()">${this._compareMode ? 'Back to workbench' : 'Compare models'}</button>` : ''}
+          ${active && !this._compareMode ? `<button class="btn btn-ghost btn-sm mdl-compare-btn${active._searchMode?' active':''}" onclick="Pages.models.toggleSearch('${active.id}')">${active._searchMode ? '← Workbench' : 'Parameter search'}</button>` : ''}
         </div>
         ${this._compareMode
           ? this._renderCompare()
           : active
-            ? this._renderWorkbench(active)
+            ? (active._searchMode ? this._renderSearch(active) : this._renderWorkbench(active))
             : `<div class="empty-state" style="margin-top:32px"><div class="empty-title">No models yet</div><div class="empty-sub">Click "+ Scorecard" to create your first model.</div></div>`}`;
 
-      if (!this._compareMode && active?.results) requestAnimationFrame(() => this._renderCharts(active));
+      if (!this._compareMode && active) {
+        if (active._searchMode && active._searchResults) requestAnimationFrame(() => this.renderSearchCharts(active));
+        else if (active.results && !active._searchMode) requestAnimationFrame(() => this._renderCharts(active));
+      }
     },
 
     _renderPrerequisites() {
@@ -2995,6 +3022,15 @@ const Pages = {
           varConfig:{},
         },
         results:null, _error:null,
+        _searchMode:false, _searchRunning:false, _searchProgress:null, _searchResults:null,
+        _searchGrid:{
+          maxBins:     { enabled:false, values:'3,4,5,6' },
+          preBinsK:    { enabled:false, values:'15,20,25' },
+          ivThreshold: { enabled:false, values:'0.01,0.02,0.05' },
+          lambda:      { enabled:false, values:'0.001,0.01,0.1' },
+          PDO:         { enabled:false, values:'15,20,25,30' },
+          monotonicity:{ enabled:false, values:'auto,ascending,descending' },
+        },
       });
       this._activeId = id;
       this.render();
@@ -3045,6 +3081,274 @@ const Pages = {
         this._running = false;
         this.render();
       }, 10);
+    },
+
+    // ── Parameter search ─────────────────────────────────────────────────
+    toggleSearch(id) {
+      const m = State.models.find(m=>m.id===id);
+      if (!m) return;
+      m._searchMode = !m._searchMode;
+      this.render();
+    },
+
+    updateSearchGrid(id, key, field, val) {
+      const m = State.models.find(m=>m.id===id);
+      if (!m) return;
+      if (!m._searchGrid[key]) m._searchGrid[key] = { enabled:false, values:'' };
+      m._searchGrid[key][field] = val;
+      if (field === 'enabled') this.render();
+    },
+
+    searchSortBy(id, metric) {
+      const m = State.models.find(m=>m.id===id);
+      if (!m?._searchResults) return;
+      m._searchResults.sortBy = metric;
+      this.render();
+    },
+
+    _cartesian(grid) {
+      const keys = Object.keys(grid);
+      if (!keys.length) return [];
+      let result = [{}];
+      for (const key of keys) {
+        result = result.flatMap(combo => grid[key].map(v => ({ ...combo, [key]: v })));
+      }
+      return result;
+    },
+
+    _parseGridValues(str) {
+      return (str||'').split(',').map(s=>s.trim()).filter(Boolean).map(v => {
+        const n = Number(v);
+        return isNaN(n) ? v : n;
+      });
+    },
+
+    runSearch(id) {
+      const m = State.models.find(m=>m.id===id);
+      if (!m) return;
+      if (!m.params.target) { UI.toast('Select a target column in the model setup first'); return; }
+      if (!m.params.predictors.length) { UI.toast('Select at least one predictor in the model setup first'); return; }
+
+      const grid = {};
+      for (const [key, cfg] of Object.entries(m._searchGrid)) {
+        if (!cfg.enabled) continue;
+        const vals = this._parseGridValues(cfg.values);
+        if (vals.length) grid[key] = vals;
+      }
+      if (!Object.keys(grid).length) { UI.toast('Enable at least one parameter to sweep'); return; }
+
+      const combos = this._cartesian(grid);
+      if (combos.length > 500 && !confirm(`This will run ${combos.length} models. Continue?`)) return;
+
+      m._searchResults = { combos:[], sweepKeys:Object.keys(grid), sortBy:'gini', done:false };
+      m._searchProgress = { done:0, total:combos.length };
+      m._searchRunning = true;
+      this.render();
+
+      const CHUNK = 5;
+      let i = 0;
+      const tick = () => {
+        if (!m._searchRunning) { m._searchProgress = null; this.render(); return; }
+        for (let j=0; j<CHUNK && i<combos.length; j++, i++) {
+          const overrides = combos[i];
+          try {
+            const r = ModelsEngine.runScorecard({ ...m.params, ...overrides, data:State.data, columns:State.columns, weightCol:State.weightCol });
+            const metricsFlat = {};
+            for (const [split, met] of Object.entries(r.metrics)) {
+              metricsFlat[`gini_${split}`] = met.gini;
+              metricsFlat[`auc_${split}`]  = met.auc;
+              metricsFlat[`ks_${split}`]   = met.ks;
+            }
+            m._searchResults.combos.push({ params:overrides, metrics:r.metrics, metricsFlat, predictors:r.predictors.length });
+          } catch(e) { /* skip failed combos */ }
+          m._searchProgress.done = i + 1;
+        }
+        if (i < combos.length) { this.render(); setTimeout(tick, 0); }
+        else { m._searchRunning = false; m._searchResults.done = true; m._searchProgress = null; this.render(); }
+      };
+      setTimeout(tick, 0);
+    },
+
+    stopSearch(id) {
+      const m = State.models.find(m=>m.id===id);
+      if (m) { m._searchRunning = false; }
+    },
+
+    applySearchParams(id, idx) {
+      const m = State.models.find(m=>m.id===id);
+      if (!m?._searchResults?.combos[idx]) return;
+      Object.assign(m.params, m._searchResults.combos[idx].params);
+      m._searchMode = false;
+      UI.toast('Params applied — click Run scorecard to train the model');
+      this.render();
+    },
+
+    _renderSearch(model) {
+      return `<div class="srch-layout">
+        <div class="srch-cfg">${this._renderSearchConfig(model)}</div>
+        <div class="srch-results">${this._renderSearchResults(model)}</div>
+      </div>`;
+    },
+
+    _renderSearchConfig(model) {
+      const id = model.id;
+      const g = model._searchGrid;
+      const PARAMS = [
+        { key:'maxBins',      label:'Max bins',      placeholder:'e.g. 3,4,5,6' },
+        { key:'preBinsK',     label:'Pre-bins',      placeholder:'e.g. 15,20,25' },
+        { key:'ivThreshold',  label:'IV threshold',  placeholder:'e.g. 0.01,0.02,0.05' },
+        { key:'lambda',       label:'L2 lambda',     placeholder:'e.g. 0.001,0.01,0.1' },
+        { key:'PDO',          label:'PDO',           placeholder:'e.g. 15,20,25,30' },
+        { key:'monotonicity', label:'Monotonicity',  placeholder:'e.g. auto,ascending' },
+      ];
+      const rows = PARAMS.map(({ key, label, placeholder }) => {
+        const cfg = g[key] || { enabled:false, values:'' };
+        return `<div class="srch-grid-row">
+          <label><input type="checkbox"${cfg.enabled?' checked':''} onchange="Pages.models.updateSearchGrid('${id}','${key}','enabled',this.checked)"> ${label}</label>
+          <input type="text" class="srch-grid-vals"${cfg.enabled?'':' disabled'} value="${Fmt.escHtml(cfg.values||'')}" placeholder="${placeholder}" oninput="Pages.models.updateSearchGrid('${id}','${key}','values',this.value)"${cfg.enabled?'':' disabled'}>
+        </div>`;
+      }).join('');
+
+      const activeParams = PARAMS.filter(({key}) => g[key]?.enabled);
+      const counts = activeParams.map(({key}) => this._parseGridValues(g[key]?.values||'').length || 0);
+      const totalCombos = counts.length ? counts.reduce((a,b)=>a*b,1) : 0;
+
+      return `
+        <div class="srch-cfg-section">
+          <div class="srch-cfg-title">Parameter grid <span class="mdl-tip" title="Check a parameter to include it in the sweep. Enter comma-separated values to try. All combinations are evaluated.">?</span></div>
+          ${rows}
+        </div>
+        <div style="padding:12px 14px;border-bottom:1px solid var(--border)">
+          <div style="font-size:11px;color:var(--text-3);margin-bottom:8px">${totalCombos ? `${totalCombos} combination${totalCombos!==1?'s':''}` : 'No params selected'}</div>
+          ${model._searchRunning
+            ? `<button class="btn btn-sm" style="background:var(--danger)18;border:1px solid var(--danger)44;color:var(--danger)" onclick="Pages.models.stopSearch('${id}')">Stop</button>`
+            : `<button class="btn btn-primary"${!totalCombos?' disabled':''} onclick="Pages.models.runSearch('${id}')">Run search</button>`}
+        </div>
+        <div style="padding:10px 14px">
+          <div style="font-size:10px;color:var(--text-3);line-height:1.6">All other parameters use the current model settings. Only the checked parameters vary per combination.</div>
+        </div>`;
+    },
+
+    _renderSearchResults(model) {
+      const prog = model._searchProgress;
+      const res  = model._searchResults;
+
+      if (!res && !prog) {
+        return `<div class="empty-state"><div class="empty-title">No search run yet</div><div class="empty-sub">Configure parameters on the left, then click Run search.</div></div>`;
+      }
+
+      let html = '';
+
+      if (prog) {
+        const pct = prog.total ? Math.round(prog.done / prog.total * 100) : 0;
+        html += `<div class="srch-progress-wrap">
+          <div style="font-size:12px;font-weight:600;color:var(--text)">Running… ${prog.done} / ${prog.total}</div>
+          <div class="srch-progress-bar"><div class="srch-progress-fill" style="width:${pct}%"></div></div>
+          <div class="srch-progress-text">${pct}% complete — ${prog.total - prog.done} remaining</div>
+        </div>`;
+      }
+
+      if (!res?.combos.length) return html;
+
+      const splits = [...new Set(res.combos.flatMap(c => Object.keys(c.metrics)))];
+      const primarySplit = splits.includes('train') ? 'train' : splits[0];
+      const sortBy = res.sortBy || 'gini';
+      const sortKey = `${sortBy}_${primarySplit}`;
+      const sorted = [...res.combos].map((c,i)=>({...c,_origIdx:i}))
+        .sort((a,b) => (b.metricsFlat[sortKey]??-1) - (a.metricsFlat[sortKey]??-1));
+
+      const sweepKeys = res.sweepKeys || [];
+      const fmt4   = v => v==null ? '—' : v.toFixed(4);
+      const fmtPct = v => v==null ? '—' : (v*100).toFixed(2)+'%';
+      const fmtVal = v => typeof v==='number' ? (Number.isInteger(v)?String(v):v.toFixed(4)) : String(v??'—');
+
+      const sortOpts = [['gini','Gini'],['auc','AUC'],['ks','KS']].map(([k,l])=>
+        `<option value="${k}"${sortBy===k?' selected':''}>${l}</option>`).join('');
+
+      const metricCols = splits.flatMap(s => [
+        { key:`gini_${s}`, label:`Gini (${s})` },
+        { key:`auc_${s}`,  label:`AUC (${s})` },
+        { key:`ks_${s}`,   label:`KS (${s})` },
+      ]);
+
+      const thead = `<tr>
+        ${sweepKeys.map(k=>`<th>${Fmt.escHtml(k)}</th>`).join('')}
+        ${metricCols.map(c=>`<th>${Fmt.escHtml(c.label)}</th>`).join('')}
+        <th>Vars</th><th></th>
+      </tr>`;
+
+      const tbody = sorted.map((combo, rank) => {
+        const isBest = rank === 0;
+        const paramCells = sweepKeys.map(k=>`<td>${Fmt.escHtml(fmtVal(combo.params[k]))}</td>`).join('');
+        const metricCells = metricCols.map(c => {
+          const v = combo.metricsFlat[c.key];
+          return `<td class="num-val">${c.key.startsWith('ks_') ? fmtPct(v) : fmt4(v)}</td>`;
+        }).join('');
+        return `<tr${isBest?' class="srch-row-best"':''}>
+          ${paramCells}${metricCells}
+          <td class="num-val">${combo.predictors}</td>
+          <td><button class="srch-apply-btn" onclick="Pages.models.applySearchParams('${model.id}',${combo._origIdx})" title="Apply these params to the model">Apply</button></td>
+        </tr>`;
+      }).join('');
+
+      html += `<div class="srch-table-wrap">
+        <div style="display:flex;align-items:center;gap:12px;margin-bottom:10px;flex-wrap:wrap">
+          <div class="mdl-out-title" style="margin-bottom:0">${res.combos.length} combination${res.combos.length!==1?'s':''}</div>
+          <div style="display:flex;align-items:center;gap:6px;font-size:11px;color:var(--text-2);margin-left:auto">
+            Sort by <select style="font-size:11px;padding:2px 6px;background:var(--surface-2);border:1px solid var(--border);border-radius:var(--radius);color:var(--text)" onchange="Pages.models.searchSortBy('${model.id}',this.value)">${sortOpts}</select>
+          </div>
+        </div>
+        <div style="overflow-x:auto">
+          <table class="srch-table"><thead>${thead}</thead><tbody>${tbody}</tbody></table>
+        </div>
+      </div>`;
+
+      if (sweepKeys.length === 2 && res.done) {
+        html += `<div id="srch-heatmap-${model.id}" style="background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:14px">
+          <div class="mdl-out-title">Heatmap — ${sortBy.toUpperCase()} (${primarySplit}) · ${sweepKeys[0]} × ${sweepKeys[1]}</div>
+          <div id="srch-hm-plot-${model.id}" style="height:280px"></div>
+        </div>`;
+      }
+
+      return html;
+    },
+
+    renderSearchCharts(model) {
+      const res = model._searchResults;
+      if (!res?.done) return;
+      const sweepKeys = res.sweepKeys || [];
+      if (sweepKeys.length !== 2) return;
+
+      const el = document.getElementById(`srch-hm-plot-${model.id}`);
+      if (!el) return;
+
+      const splits = [...new Set(res.combos.flatMap(c => Object.keys(c.metrics)))];
+      const primarySplit = splits.includes('train') ? 'train' : splits[0];
+      const sortBy = res.sortBy || 'gini';
+      const metricKey = `${sortBy}_${primarySplit}`;
+
+      const k0 = sweepKeys[0], k1 = sweepKeys[1];
+      const vals0 = [...new Set(res.combos.map(c=>c.params[k0]))];
+      const vals1 = [...new Set(res.combos.map(c=>c.params[k1]))];
+
+      const z = vals1.map(v1 => vals0.map(v0 => {
+        const combo = res.combos.find(c => String(c.params[k0])===String(v0) && String(c.params[k1])===String(v1));
+        return combo?.metricsFlat[metricKey] ?? null;
+      }));
+
+      Plotly.react(el, [{
+        type:'heatmap', z, x:vals0.map(String), y:vals1.map(String),
+        colorscale:'Blues',
+        text: z.map(row => row.map(v => v==null?'':v.toFixed(4))),
+        texttemplate:'%{text}',
+        hovertemplate:`${k0}=%{x}<br>${k1}=%{y}<br>${sortBy.toUpperCase()}=%{z:.4f}<extra></extra>`,
+      }], {
+        paper_bgcolor:'transparent', plot_bgcolor:'transparent',
+        margin:{t:10,r:20,b:40,l:60},
+        xaxis:{ title:k0, color:'var(--text-2)', gridcolor:'var(--border)', tickfont:{size:10} },
+        yaxis:{ title:k1, color:'var(--text-2)', gridcolor:'var(--border)', tickfont:{size:10} },
+        font:{ family:'inherit', color:'var(--text-2)' },
+      }, { responsive:true, displayModeBar:false });
     },
 
     // ── Per-variable config ───────────────────────────────────────────────
