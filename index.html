@@ -289,6 +289,26 @@ a{color:inherit;text-decoration:none}
 .step-actions{display:flex;gap:4px;margin-left:auto;flex-shrink:0}
 .tfm-empty{display:flex;align-items:center;justify-content:center;min-height:100px;border:1px dashed var(--border);border-radius:var(--radius);color:var(--text-3);font-size:12px}
 .tfm-banner{background:var(--accent-dim);border:1px solid rgba(79,124,255,.3);border-radius:var(--radius);padding:8px 12px;font-size:12px;color:var(--accent);display:flex;align-items:center;gap:8px;margin-bottom:16px}
+/* ── Models ────────────────────────────────────────────────────────────────── */
+.mdl-prereq{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:12px 14px;margin-bottom:20px}
+.mdl-prereq-title{font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.07em;color:var(--text-3);margin-bottom:8px}
+.mdl-prereq-item{display:flex;align-items:center;gap:8px;font-size:12px;color:var(--text-2);padding:4px 0}
+.mdl-prereq-item+.mdl-prereq-item{border-top:1px solid var(--border);padding-top:6px;margin-top:2px}
+.mdl-prereq-item.ok .mdl-prereq-icon{color:var(--success)}
+.mdl-prereq-item.warn .mdl-prereq-icon{color:var(--warn)}
+.mdl-prereq-icon{font-size:12px;font-weight:700;width:14px;flex-shrink:0}
+/* null-handling modal table */
+.nh-table{width:100%;border-collapse:collapse;font-size:12px}
+.nh-table th{text-align:left;font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;color:var(--text-3);padding:4px 8px;border-bottom:1px solid var(--border)}
+.nh-table td{padding:5px 8px;border-bottom:1px solid var(--border);vertical-align:middle}
+.nh-table tr:last-child td{border-bottom:none}
+.nh-table select,.nh-table input{font-size:11px;padding:3px 6px;background:var(--surface-2);border:1px solid var(--border);border-radius:var(--radius);color:var(--text);width:100%}
+/* model split modal */
+.ms-section{margin-bottom:12px}
+.ms-ratio-row{display:flex;gap:8px;align-items:center}
+.ms-ratio-row label{font-size:11px;color:var(--text-2);width:70px;flex-shrink:0}
+.ms-ratio-row input{flex:1}
+.ms-ratio-preview{font-size:11px;color:var(--text-3);margin-top:4px}
 
 /* ── Modal ────────────────────────────────────────────────────────────────── */
 .modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,.65);display:none;align-items:center;justify-content:center;z-index:500;backdrop-filter:blur(3px)}
@@ -350,6 +370,13 @@ a{color:inherit;text-decoration:none}
         </svg>
         <span class="nav-label">Transform</span>
       </button>
+      <button class="nav-item" data-page="models">
+        <svg class="nav-icon" viewBox="0 0 16 16" fill="none">
+          <circle cx="8" cy="6" r="3" stroke="currentColor" stroke-width="1.5"/>
+          <path d="M2 14c0-3.3 2.7-6 6-6s6 2.7 6 6" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+        </svg>
+        <span class="nav-label">Models</span>
+      </button>
       <button class="nav-item" data-page="dashboard">
         <svg class="nav-icon" viewBox="0 0 16 16" fill="none">
           <rect x="1" y="1" width="14" height="9" rx="1" stroke="currentColor" stroke-width="1.5"/>
@@ -377,6 +404,7 @@ a{color:inherit;text-decoration:none}
     <div class="page" id="page-explore"></div>
     <div class="page" id="page-column-detail"></div>
     <div class="page" id="page-transform"></div>
+    <div class="page" id="page-models"></div>
     <div class="page" id="page-dashboard"></div>
     <div class="page" id="page-settings"></div>
   </div>
@@ -404,6 +432,7 @@ const State = {
   totalRows: 0,
   transforms: [],
   _stepCounts: [],
+  models: [],
   currentPage: 'overview',
   prevPage: null,
   columnDetail: null,
@@ -707,8 +736,10 @@ const DataEngine = {
       case 'pivot':   return this._tfPivot(data, columns, step.params);
       case 'unpivot': return this._tfUnpivot(data, columns, step.params);
       case 'calc':    return this._tfCalc(data, columns, step.params);
-      case 'rename':  return this._tfRename(data, columns, step.params);
-      case 'drop':    return this._tfDrop(data, columns, step.params);
+      case 'rename':        return this._tfRename(data, columns, step.params);
+      case 'drop':          return this._tfDrop(data, columns, step.params);
+      case 'null_handling': return this._tfNullHandling(data, columns, step.params);
+      case 'model_split':   return this._tfModelSplit(data, columns, step.params);
       default: return { data, columns };
     }
   },
@@ -868,6 +899,126 @@ const DataEngine = {
   _tfDrop(data, columns, { col }) {
     const result = data.map(row => { const r = {...row}; delete r[col]; return r; });
     return { data: result, columns: columns.filter(c => c.name !== col) };
+  },
+
+  _tfNullHandling(data, columns, { actions }) {
+    if (!actions?.length) return { data, columns };
+    let result = data.map(r => ({...r}));
+    let cols = [...columns];
+    const wCol = cols.find(c => c.isWeight)?.name;
+    const w = row => wCol ? (Number(row[wCol]) || 1) : 1;
+
+    for (const { col, strategy, value } of actions) {
+      if (!strategy) continue;
+      const meta = cols.find(c => c.name === col);
+      if (!meta) continue;
+      const isNum = meta.type === 'numeric';
+      const nonNull = result.filter(r => r[col] != null);
+
+      if (strategy === 'mean' && isNum) {
+        const totalW = nonNull.reduce((s, r) => s + w(r), 0);
+        if (!totalW) continue;
+        const fillVal = nonNull.reduce((s, r) => s + r[col] * w(r), 0) / totalW;
+        result = result.map(r => r[col] == null ? {...r, [col]: fillVal} : r);
+
+      } else if (strategy === 'median' && isNum) {
+        const sorted = [...nonNull].sort((a, b) => a[col] - b[col]);
+        const totalW = sorted.reduce((s, r) => s + w(r), 0);
+        let cum = 0, fillVal = sorted[0]?.[col] ?? 0;
+        for (const r of sorted) { cum += w(r); if (cum >= totalW / 2) { fillVal = r[col]; break; } }
+        result = result.map(r => r[col] == null ? {...r, [col]: fillVal} : r);
+
+      } else if (strategy === 'mode') {
+        const counts = {};
+        for (const r of nonNull) { const k = String(r[col]); counts[k] = (counts[k] || 0) + w(r); }
+        const top = Object.entries(counts).sort((a, b) => b[1] - a[1])[0];
+        if (!top) continue;
+        const fillVal = isNum ? parseFloat(top[0]) : top[0];
+        result = result.map(r => r[col] == null ? {...r, [col]: fillVal} : r);
+
+      } else if (strategy === 'constant') {
+        const fillVal = isNum ? parseFloat(value) : (value ?? '');
+        result = result.map(r => r[col] == null ? {...r, [col]: fillVal} : r);
+
+      } else if (strategy === 'drop') {
+        result = result.filter(r => r[col] != null);
+
+      } else if (strategy === 'indicator') {
+        const newCol = `${col}_is_null`;
+        result = result.map(r => ({...r, [newCol]: r[col] == null ? 1 : 0}));
+        if (!cols.find(c => c.name === newCol))
+          cols = [...cols, { name: newCol, type: 'categorical', nullCount: 0, uniqueCount: 2, isWeight: false }];
+
+      } else if (strategy === 'ffill') {
+        let last = null;
+        result = result.map(r => {
+          if (r[col] != null) { last = r[col]; return r; }
+          return last != null ? {...r, [col]: last} : r;
+        });
+
+      } else if (strategy === 'bfill') {
+        let next = null;
+        const rev = [...result].reverse().map(r => {
+          if (r[col] != null) { next = r[col]; return r; }
+          return next != null ? {...r, [col]: next} : r;
+        });
+        result = rev.reverse();
+      }
+    }
+    return { data: result, columns: this._reana(result, cols) };
+  },
+
+  _tfModelSplit(data, columns, { strategy, train, validation, seed, outputCol, stratifyCol, timeCol }) {
+    const outCol = outputCol || '_split';
+    const trainR = (train ?? 70) / 100;
+    const valR   = (validation ?? 15) / 100;
+    const n = data.length;
+
+    let result = data.map(r => ({...r, [outCol]: 'test'}));
+
+    if (strategy === 'stratified' && stratifyCol) {
+      const groups = {};
+      data.forEach((r, i) => {
+        const key = String(r[stratifyCol] ?? '__null__');
+        (groups[key] = groups[key] || []).push(i);
+      });
+      for (const idxList of Object.values(groups)) {
+        const sh = this._seededShuffle(idxList, seed ?? 42);
+        const nTr = Math.round(sh.length * trainR), nVa = Math.round(sh.length * valR);
+        sh.forEach((idx, j) => {
+          result[idx][outCol] = j < nTr ? 'train' : j < nTr + nVa ? 'validation' : 'test';
+        });
+      }
+    } else if (strategy === 'time' && timeCol) {
+      const order = [...Array(n).keys()].sort((a, b) => {
+        const va = data[a][timeCol], vb = data[b][timeCol];
+        return va < vb ? -1 : va > vb ? 1 : 0;
+      });
+      const nTr = Math.round(n * trainR), nVa = Math.round(n * valR);
+      order.forEach((idx, j) => {
+        result[idx][outCol] = j < nTr ? 'train' : j < nTr + nVa ? 'validation' : 'test';
+      });
+    } else {
+      const sh = this._seededShuffle([...Array(n).keys()], seed ?? 42);
+      const nTr = Math.round(n * trainR), nVa = Math.round(n * valR);
+      sh.forEach((idx, j) => {
+        result[idx][outCol] = j < nTr ? 'train' : j < nTr + nVa ? 'validation' : 'test';
+      });
+    }
+
+    const newCols = this._reana(result, [
+      ...columns,
+      { name: outCol, type: 'categorical', nullCount: 0, uniqueCount: valR > 0 ? 3 : 2, isWeight: false },
+    ]);
+    return { data: result, columns: newCols };
+  },
+
+  _seededShuffle(arr, seed) {
+    const a = [...arr];
+    let s = (seed || 42) >>> 0;
+    const rand = () => { s = Math.imul(s ^ (s >>> 15), s | 1) ^ Math.imul(s ^ (s << 7), s | 61); return ((s ^ (s >>> 14)) >>> 0) / 0x100000000; };
+    for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(rand() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; }
+    return a;
   },
 };
 
@@ -1593,6 +1744,9 @@ const Pages = {
             ${[['filter','Filter rows'],['rollup','Rollup'],['pivot','Pivot'],['unpivot','Unpivot'],
                ['calc','Calculated column'],['rename','Rename column'],['drop','Drop column']]
               .map(([t, l]) => `<button class="tfm-palette-btn" onclick="Pages.transform.openModal('${t}',null)">${l}</button>`).join('')}
+            <div class="tfm-palette-title" style="margin-top:12px">Model prep</div>
+            ${[['null_handling','Null handling'],['model_split','Model split']]
+              .map(([t, l]) => `<button class="tfm-palette-btn" onclick="Pages.transform.openModal('${t}',null)">${l}</button>`).join('')}
           </div>
           <div class="tfm-right">
             ${n === 0
@@ -1644,8 +1798,11 @@ const Pages = {
         case 'pivot':   return `${p.pivotCol} → cols, ${p.valueCol} values (${p.aggFn})`;
         case 'unpivot': return `melt → ${p.varName} / ${p.valName}`;
         case 'calc':    return `${p.newCol} = ${p.expression}`;
-        case 'rename':  return `${p.oldName} → ${p.newName}`;
-        case 'drop':    return p.col;
+        case 'rename':        return `${p.oldName} → ${p.newName}`;
+        case 'drop':          return p.col;
+        case 'null_handling': return (p.actions||[]).map(a=>`${a.col}:${a.strategy}`).join(', ') || 'no actions';
+        case 'model_split':   return `${p.strategy||'random'} · ${p.train??70}/${p.validation??15}/${100-(p.train??70)-(p.validation??15)}% → ${p.outputCol||'_split'}`;
+        case 'apply_model':   return p.modelName || 'model';
         default: return '';
       }
     },
@@ -1798,6 +1955,95 @@ const Pages = {
           if (!col) return;
           this._commit(type, { col }, editIdx);
         };
+
+      } else if (type === 'null_handling') {
+        title = 'Null handling';
+        const nullCols = State.columns.filter(c => c.nullCount > 0 && !c.isWeight);
+        const existActions = p.actions || [];
+        if (!nullCols.length) {
+          body = `<p style="font-size:12px;color:var(--text-2)">No columns with missing values in the current dataset.</p>`;
+          onConfirm = () => { UI.toast('No nulls to handle'); };
+        } else {
+          body = `
+            <p style="font-size:12px;color:var(--text-2);margin-bottom:12px">Configure how to handle missing values. Unconfigured columns are left unchanged.</p>
+            <table class="nh-table">
+              <thead><tr><th>Column</th><th>Nulls</th><th>Null %</th><th>Strategy</th><th>Value</th></tr></thead>
+              <tbody>
+                ${nullCols.map((col, i) => {
+                  const ex = existActions.find(a => a.col === col.name) || {};
+                  const isNum = col.type === 'numeric';
+                  const stratOpts = [
+                    ['', '— skip —'],
+                    ...(isNum ? [['mean','Mean'],['median','Median']] : []),
+                    ['mode','Mode'],['constant','Constant'],['drop','Drop rows'],
+                    ['indicator','Add indicator'],['ffill','Forward fill'],['bfill','Backward fill'],
+                  ].map(([v, l]) => `<option value="${v}" ${ex.strategy===v?'selected':''}>${l}</option>`).join('');
+                  const nullPct = State.data?.length ? ((col.nullCount / State.data.length) * 100).toFixed(1) : '?';
+                  return `<tr>
+                    <td style="font-family:var(--mono);font-size:11px;white-space:nowrap">${Fmt.escHtml(col.name)}</td>
+                    <td style="color:var(--danger);text-align:right">${col.nullCount.toLocaleString()}</td>
+                    <td style="color:var(--danger);text-align:right">${nullPct}%</td>
+                    <td><select id="nh-strat-${i}" onchange="Pages.transform._nhToggleVal(${i})">${stratOpts}</select></td>
+                    <td><input id="nh-val-${i}" type="text" placeholder="value" value="${Fmt.escHtml(ex.value||'')}" style="display:${ex.strategy==='constant'?'block':'none'}"></td>
+                  </tr>`;
+                }).join('')}
+              </tbody>
+            </table>`;
+          onConfirm = () => {
+            const actions = nullCols.map((col, i) => {
+              const strategy = g(`nh-strat-${i}`)?.value;
+              if (!strategy) return null;
+              const value = g(`nh-val-${i}`)?.value ?? '';
+              return { col: col.name, strategy, value };
+            }).filter(Boolean);
+            if (!actions.length) { UI.toast('Select at least one strategy'); return; }
+            this._commit('null_handling', { actions }, editIdx);
+          };
+        }
+
+      } else if (type === 'model_split') {
+        title = 'Model split';
+        const allCols = State.columns.filter(c => !c.isWeight);
+        const exStrat = p.strategy || 'random';
+        const exTrain = p.train ?? 70, exVal = p.validation ?? 15;
+        body = `
+          <div class="modal-section"><div class="modal-label">Strategy</div>
+            <select class="form-select" id="ms-strat" style="width:100%" onchange="Pages.transform._msUpdateSplit()">
+              ${[['random','Random'],['stratified','Stratified by target'],['time','Time-based']]
+                .map(([v,l])=>`<option value="${v}" ${exStrat===v?'selected':''}>${l}</option>`).join('')}
+            </select></div>
+          <div class="modal-section">
+            <div class="modal-label">Split ratios (must sum to 100%)</div>
+            <div class="ms-ratio-row"><label>Train %</label><input class="form-input" id="ms-train" type="number" min="1" max="98" value="${exTrain}" oninput="Pages.transform._msUpdateSplit()"></div>
+            <div class="ms-ratio-row" style="margin-top:6px"><label>Validation %</label><input class="form-input" id="ms-val" type="number" min="0" max="97" value="${exVal}" oninput="Pages.transform._msUpdateSplit()"></div>
+            <div class="ms-ratio-preview" id="ms-preview">Test: ${100-exTrain-exVal}%</div>
+          </div>
+          <div class="modal-section"><div class="modal-label">Seed (for reproducibility)</div>
+            <input class="form-input" id="ms-seed" type="number" style="width:100%" value="${p.seed??42}"></div>
+          <div class="modal-section"><div class="modal-label">Output column name</div>
+            <input class="form-input" id="ms-out" style="width:100%" value="${p.outputCol||'_split'}"></div>
+          <div id="ms-stratcol-wrap" class="modal-section" style="display:${exStrat==='stratified'?'block':'none'}">
+            <div class="modal-label">Stratify by column</div>
+            <select class="form-select" id="ms-stratcol" style="width:100%">
+              ${allCols.map(c=>`<option value="${c.name}" ${p.stratifyCol===c.name?'selected':''}>${c.name}</option>`).join('')}
+            </select></div>
+          <div id="ms-timecol-wrap" class="modal-section" style="display:${exStrat==='time'?'block':'none'}">
+            <div class="modal-label">Time / index column</div>
+            <select class="form-select" id="ms-timecol" style="width:100%">
+              ${allCols.map(c=>`<option value="${c.name}" ${p.timeCol===c.name?'selected':''}>${c.name}</option>`).join('')}
+            </select></div>`;
+        onConfirm = () => {
+          const strategy = g('ms-strat')?.value || 'random';
+          const train = parseInt(g('ms-train')?.value) || 70;
+          const validation = parseInt(g('ms-val')?.value) || 0;
+          const test = 100 - train - validation;
+          if (test < 1) { UI.toast('Test split must be at least 1%'); return; }
+          const seed = parseInt(g('ms-seed')?.value) || 42;
+          const outputCol = g('ms-out')?.value?.trim() || '_split';
+          const stratifyCol = strategy === 'stratified' ? g('ms-stratcol')?.value : null;
+          const timeCol = strategy === 'time' ? g('ms-timecol')?.value : null;
+          this._commit('model_split', { strategy, train, validation, test, seed, outputCol, stratifyCol, timeCol }, editIdx);
+        };
       }
 
       Modal.show(title, body, onConfirm);
@@ -1860,12 +2106,81 @@ const Pages = {
       UI.toast('CSV downloaded');
     },
 
+    _nhToggleVal(i) {
+      const strat = document.getElementById(`nh-strat-${i}`)?.value;
+      const inp = document.getElementById(`nh-val-${i}`);
+      if (inp) inp.style.display = strat === 'constant' ? 'block' : 'none';
+    },
+
+    _msUpdateSplit() {
+      const train = parseInt(document.getElementById('ms-train')?.value) || 0;
+      const val   = parseInt(document.getElementById('ms-val')?.value)   || 0;
+      const test  = 100 - train - val;
+      const prev  = document.getElementById('ms-preview');
+      if (prev) prev.textContent = `Test: ${test}%` + (test < 1 ? ' — must be at least 1%' : '');
+      const strat = document.getElementById('ms-strat')?.value;
+      const sw = document.getElementById('ms-stratcol-wrap');
+      const tw = document.getElementById('ms-timecol-wrap');
+      if (sw) sw.style.display = strat === 'stratified' ? 'block' : 'none';
+      if (tw) tw.style.display = strat === 'time'       ? 'block' : 'none';
+    },
+
     resetAll() {
       if (!confirm('Remove all transform steps?')) return;
       State.transforms = [];
       DataEngine.recompute();
       this.render();
       UI.toast('All transforms cleared');
+    },
+  },
+
+  // ── Models ────────────────────────────────────────────────────────────────
+  models: {
+    render() {
+      const el = document.getElementById('page-models');
+      if (!State.rawData) {
+        el.innerHTML = `<div class="empty-state"><div class="empty-title">No dataset loaded</div><div class="empty-sub">Load a CSV from the Overview page first.</div></div>`;
+        return;
+      }
+      el.innerHTML = `
+        ${this._renderPrerequisites()}
+        <div class="empty-state" style="margin-top:32px">
+          <div class="empty-title">Model workbench</div>
+          <div class="empty-sub">Scorecard and other models coming in the next build phase.</div>
+        </div>`;
+    },
+
+    _renderPrerequisites() {
+      // Check null handling steps applied
+      const nhSteps = State.transforms.filter(s => s.type === 'null_handling' && s.enabled !== false);
+      const handledCols = nhSteps.flatMap(s => (s.params.actions || []).map(a => a.col));
+      const nullCols = State.columns.filter(c => c.nullCount > 0 && !c.isWeight);
+
+      // Check for split column
+      const splitCol = State.columns.find(c => c.name === '_split' || State.transforms.some(s => s.type === 'model_split' && s.enabled !== false && s.params.outputCol === c.name));
+
+      const teleportBtn = (stepType, label) =>
+        `<button class="btn btn-ghost btn-sm" style="margin-left:auto;flex-shrink:0"
+          onclick="UI.navigate('transform');setTimeout(()=>Pages.transform.openModal('${stepType}',null),120)">${label} →</button>`;
+
+      const nullItem = nullCols.length === 0
+        ? `<div class="mdl-prereq-item ok"><span class="mdl-prereq-icon">✓</span><span>No missing values detected</span></div>`
+        : handledCols.length
+          ? `<div class="mdl-prereq-item ok"><span class="mdl-prereq-icon">✓</span><span>Null handling applied — ${handledCols.map(Fmt.escHtml).join(', ')}</span></div>`
+          : `<div class="mdl-prereq-item warn"><span class="mdl-prereq-icon">!</span>
+              <span>${nullCols.length} column${nullCols.length>1?'s':''} with nulls — not handled (${nullCols.map(c=>Fmt.escHtml(c.name)).join(', ')})</span>
+              ${teleportBtn('null_handling','Set up null handling')}</div>`;
+
+      const splitItem = splitCol
+        ? `<div class="mdl-prereq-item ok"><span class="mdl-prereq-icon">✓</span><span>Split column detected — train/validation/test splits available</span></div>`
+        : `<div class="mdl-prereq-item warn"><span class="mdl-prereq-icon">!</span>
+            <span>No split column — model will train on full data, in-sample metrics only</span>
+            ${teleportBtn('model_split','Set up split')}</div>`;
+
+      return `<div class="mdl-prereq">
+        <div class="mdl-prereq-title">Data preparation</div>
+        ${nullItem}${splitItem}
+      </div>`;
     },
   },
 
@@ -2402,6 +2717,7 @@ const UI = {
       'explore':        () => Pages.explore.render(),
       'column-detail':  () => Pages.columnDetail.render(),
       'transform':      () => Pages.transform.render(),
+      'models':         () => Pages.models.render(),
       'dashboard':      () => Pages.dashboard.render(),
       'settings':       () => Pages.settings.render(),
     };
