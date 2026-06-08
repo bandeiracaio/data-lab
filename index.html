@@ -816,10 +816,6 @@ const DataEngine = {
     return result;
   },
 
-  randomSampleRows(n) {
-    return this.sampleRows(n);
-  },
-
   exportCSV() {
     if (!State.data || !State.columns) return;
     const cols = State.columns.map(c => c.name);
@@ -889,6 +885,16 @@ const DataEngine = {
     return columns.map(c => this._analyzeColumn(data, c.name, c.type === 'numeric', c.isWeight));
   },
 
+  // Re-derive column metadata from scratch when headers may have changed
+  // (rollup/pivot/unpivot produce new column sets). Infers numeric-ness per column.
+  _reanaFresh(result) {
+    const headers = result.length ? Object.keys(result[0]) : [];
+    return headers.map(h => {
+      const isNum = result.every(r => r[h] == null || typeof r[h] === 'number');
+      return this._analyzeColumn(result, h, isNum, false);
+    });
+  },
+
   _tfFilter(data, columns, { col, op, value }) {
     const meta = columns.find(c => c.name === col);
     const isNum = meta?.type === 'numeric';
@@ -936,12 +942,7 @@ const DataEngine = {
       }
       result.push(row);
     }
-    const headers = result.length ? Object.keys(result[0]) : [];
-    const newCols = headers.map(h => {
-      const isNum = result.every(r => r[h] == null || typeof r[h] === 'number');
-      return this._analyzeColumn(result, h, isNum, false);
-    });
-    return { data: result, columns: newCols };
+    return { data: result, columns: this._reanaFresh(result) };
   },
 
   _tfPivot(data, columns, { indexCols, pivotCol, valueCol, aggFn }) {
@@ -973,12 +974,7 @@ const DataEngine = {
       }
       result.push(row);
     }
-    const headers = result.length ? Object.keys(result[0]) : [];
-    const newCols = headers.map(h => {
-      const isNum = result.every(r => r[h] == null || typeof r[h] === 'number');
-      return this._analyzeColumn(result, h, isNum, false);
-    });
-    return { data: result, columns: newCols };
+    return { data: result, columns: this._reanaFresh(result) };
   },
 
   _tfUnpivot(data, columns, { idCols, varName, valName }) {
@@ -994,12 +990,7 @@ const DataEngine = {
         result.push(newRow);
       }
     }
-    const headers = result.length ? Object.keys(result[0]) : [];
-    const newCols = headers.map(h => {
-      const isNum = result.every(r => r[h] == null || typeof r[h] === 'number');
-      return this._analyzeColumn(result, h, isNum, false);
-    });
-    return { data: result, columns: newCols };
+    return { data: result, columns: this._reanaFresh(result) };
   },
 
   _tfCalc(data, columns, { newCol, expression }) {
@@ -1536,21 +1527,9 @@ const ModelsEngine = {
 
   // ── Stage 7: Compress rows into bin-combination groups ───────────────────
   compress(rows, predictors, targetCol, wFn, woe_tables) {
-    const getBin = (r, col) => {
-      const bins = woe_tables[col];
-      if (!bins) return null;
-      const val = r[col];
-      if (val == null || val === '' || (typeof val === 'number' && isNaN(val)))
-        return bins.find(b => b.isNull) || null;
-      if (bins[0].cats !== undefined)
-        return bins.find(b => b.cats?.some(c => String(c) === String(val))) || null;
-      const nv = Number(val);
-      return bins.find(b => nv > b.lower && nv <= b.upper) || bins.find(b => !b.isNull) || null;
-    };
-
     const groups = new Map();
     for (const r of rows) {
-      const binObjs = predictors.map(col => getBin(r, col));
+      const binObjs = predictors.map(col => this._findBin(r[col], woe_tables[col]));
       const key = binObjs.map(b => b ? b.binIdx : -1).join('|');
       if (!groups.has(key)) {
         groups.set(key, {
@@ -1708,6 +1687,28 @@ const Charts = {
   },
   _cfg(extra = {}) { return Object.assign({ displayModeBar:false, responsive:true }, extra); },
 
+  // Standard axis styling (border grid/line + small muted ticks). Merge `extra` last.
+  _axis(extra = {}) {
+    const border = this._css('--border');
+    return Object.assign({
+      gridcolor:border, linecolor:border, zerolinecolor:border,
+      tickfont:{ size:10, color:this._css('--text-2') },
+    }, extra);
+  },
+
+  // Compact layout shared by miniHist / miniBar thumbnails.
+  _miniLayout(margin, { xAxisExtra = {}, bargap = .05 } = {}) {
+    const border = this._css('--border');
+    return {
+      paper_bgcolor:'transparent', plot_bgcolor:'transparent',
+      margin, height:90,
+      font:{ family:'-apple-system,BlinkMacSystemFont,"Segoe UI",system-ui,sans-serif', size:9, color:this._css('--text-2') },
+      xaxis:{ gridcolor:border, linecolor:border, zerolinecolor:border, tickfont:{size:9}, showgrid:false, ...xAxisExtra },
+      yaxis:{ gridcolor:border, linecolor:border, zerolinecolor:border, tickfont:{size:9}, showgrid:false, showticklabels:false },
+      bargap, showlegend:false,
+    };
+  },
+
   histogram(id, rows, col, bins=20) {
     const h = DataEngine.weightedHistogram(rows, col, bins);
     if (!h) return;
@@ -1716,10 +1717,8 @@ const Charts = {
       marker:{ color:this._css('--accent'), opacity:.85 },
       hovertemplate:'%{y:,.0f}<extra></extra>',
     }], this._layout({ bargap:.05, height:220,
-      xaxis:{ gridcolor:this._css('--border'), linecolor:this._css('--border'), zerolinecolor:this._css('--border'),
-              tickfont:{size:10,color:this._css('--text-2')}, title:{text:col,font:{size:11}} },
-      yaxis:{ gridcolor:this._css('--border'), linecolor:this._css('--border'), zerolinecolor:this._css('--border'),
-              tickfont:{size:10,color:this._css('--text-2')}, title:{text:'count',font:{size:11}} },
+      xaxis:this._axis({ title:{text:col,font:{size:11}} }),
+      yaxis:this._axis({ title:{text:'count',font:{size:11}} }),
     }), this._cfg());
   },
 
@@ -1734,10 +1733,8 @@ const Charts = {
     }], this._layout({
       height, bargap:.2,
       margin:{ t:10, r:16, b:30, l:120 },
-      xaxis:{ gridcolor:this._css('--border'), linecolor:this._css('--border'), zerolinecolor:this._css('--border'),
-              tickfont:{size:10,color:this._css('--text-2')} },
-      yaxis:{ gridcolor:this._css('--border'), linecolor:this._css('--border'), zerolinecolor:this._css('--border'),
-              tickfont:{size:10,color:this._css('--text-2')}, automargin:true },
+      xaxis:this._axis(),
+      yaxis:this._axis({ automargin:true }),
     }), this._cfg());
   },
 
@@ -1753,10 +1750,8 @@ const Charts = {
     }], this._layout({
       height:h,
       margin:{ t:10, r:60, b:100, l:100 },
-      xaxis:{ tickangle:-40, gridcolor:this._css('--border'), linecolor:this._css('--border'),
-              tickfont:{size:10,color:this._css('--text-2')}, automargin:true },
-      yaxis:{ gridcolor:this._css('--border'), linecolor:this._css('--border'),
-              tickfont:{size:10,color:this._css('--text-2')}, automargin:true },
+      xaxis:this._axis({ tickangle:-40, automargin:true }),
+      yaxis:this._axis({ automargin:true }),
     }), this._cfg());
   },
 
@@ -1774,10 +1769,8 @@ const Charts = {
         showscale:false,
       }], this._layout({
         height:320,
-        xaxis:{ title:{text:xCol}, gridcolor:this._css('--border'), linecolor:this._css('--border'),
-                zerolinecolor:this._css('--border'), tickfont:{size:10,color:this._css('--text-2')} },
-        yaxis:{ title:{text:yCol}, gridcolor:this._css('--border'), linecolor:this._css('--border'),
-                zerolinecolor:this._css('--border'), tickfont:{size:10,color:this._css('--text-2')} },
+        xaxis:this._axis({ title:{text:xCol} }),
+        yaxis:this._axis({ title:{text:yCol} }),
       }), this._cfg());
     } else {
       const isCatColor = colorCol && State.columns.find(c=>c.name===colorCol)?.type==='categorical';
@@ -1803,10 +1796,8 @@ const Charts = {
         hovertemplate:`${xCol}: %{x}<br>${yCol}: %{y}${colorCol?'<br>%{text}':''}<extra></extra>`,
       }], this._layout({
         height:320,
-        xaxis:{ title:{text:xCol}, gridcolor:this._css('--border'), linecolor:this._css('--border'),
-                zerolinecolor:this._css('--border'), tickfont:{size:10,color:this._css('--text-2')} },
-        yaxis:{ title:{text:yCol}, gridcolor:this._css('--border'), linecolor:this._css('--border'),
-                zerolinecolor:this._css('--border'), tickfont:{size:10,color:this._css('--text-2')} },
+        xaxis:this._axis({ title:{text:xCol} }),
+        yaxis:this._axis({ title:{text:yCol} }),
       }), this._cfg());
     }
   },
@@ -1817,32 +1808,14 @@ const Charts = {
     Plotly.newPlot(id, [{
       type:'bar', x:h.x, y:h.counts,
       marker:{ color:this._css('--accent'), opacity:.8 },
-    }], {
-      paper_bgcolor:'transparent', plot_bgcolor:'transparent',
-      margin:{ t:2, r:4, b:22, l:28 }, height:90,
-      font:{ family:'-apple-system,BlinkMacSystemFont,"Segoe UI",system-ui,sans-serif', size:9, color:this._css('--text-2') },
-      xaxis:{ gridcolor:this._css('--border'), linecolor:this._css('--border'), zerolinecolor:this._css('--border'),
-              tickfont:{size:9}, showgrid:false },
-      yaxis:{ gridcolor:this._css('--border'), linecolor:this._css('--border'), zerolinecolor:this._css('--border'),
-              tickfont:{size:9}, showgrid:false, showticklabels:false },
-      bargap:.05, showlegend:false,
-    }, this._cfg({ staticPlot:true }));
+    }], this._miniLayout({ t:2, r:4, b:22, l:28 }), this._cfg({ staticPlot:true }));
   },
 
   miniBar(id, labels, values) {
     Plotly.newPlot(id, [{
       type:'bar', x:labels.slice(0,10), y:values.slice(0,10),
       marker:{ color:this._css('--categorical'), opacity:.8 },
-    }], {
-      paper_bgcolor:'transparent', plot_bgcolor:'transparent',
-      margin:{ t:2, r:4, b:28, l:28 }, height:90,
-      font:{ family:'-apple-system,BlinkMacSystemFont,"Segoe UI",system-ui,sans-serif', size:9, color:this._css('--text-2') },
-      xaxis:{ gridcolor:this._css('--border'), linecolor:this._css('--border'), zerolinecolor:this._css('--border'),
-              tickfont:{size:9}, tickangle:-30, showgrid:false },
-      yaxis:{ gridcolor:this._css('--border'), linecolor:this._css('--border'), zerolinecolor:this._css('--border'),
-              tickfont:{size:9}, showgrid:false, showticklabels:false },
-      bargap:.2, showlegend:false,
-    }, this._cfg({ staticPlot:true }));
+    }], this._miniLayout({ t:2, r:4, b:28, l:28 }, { xAxisExtra:{ tickangle:-30 }, bargap:.2 }), this._cfg({ staticPlot:true }));
   },
 
   corrBar(id, labels, values) {
@@ -1885,11 +1858,8 @@ const Charts = {
     Plotly.newPlot(id, traces, this._layout({
       height:340, showlegend:true,
       legend:{ font:{size:10,color:this._css('--text-2')} },
-      yaxis:{ title:{text:numCol,font:{size:11}},
-              gridcolor:this._css('--border'), linecolor:this._css('--border'),
-              zerolinecolor:this._css('--border'), tickfont:{size:10,color:this._css('--text-2')} },
-      xaxis:{ gridcolor:this._css('--border'), linecolor:this._css('--border'),
-              tickfont:{size:10,color:this._css('--text-2')} },
+      yaxis:this._axis({ title:{text:numCol,font:{size:11}} }),
+      xaxis:this._axis(),
     }), this._cfg());
   },
 
@@ -1906,12 +1876,8 @@ const Charts = {
     Plotly.newPlot(id, traces, this._layout({
       height:300, barmode:'overlay', showlegend:true,
       legend:{ font:{size:10,color:this._css('--text-2')} },
-      xaxis:{ title:{text:numCol,font:{size:11}},
-              gridcolor:this._css('--border'), linecolor:this._css('--border'),
-              zerolinecolor:this._css('--border'), tickfont:{size:10,color:this._css('--text-2')} },
-      yaxis:{ title:{text:'count',font:{size:11}},
-              gridcolor:this._css('--border'), linecolor:this._css('--border'),
-              zerolinecolor:this._css('--border'), tickfont:{size:10,color:this._css('--text-2')} },
+      xaxis:this._axis({ title:{text:numCol,font:{size:11}} }),
+      yaxis:this._axis({ title:{text:'count',font:{size:11}} }),
     }), this._cfg());
   },
 
@@ -1993,7 +1959,7 @@ const Pages = {
       this._renderTable();
     },
     _getSample() {
-      if (!this._sortCol) return DataEngine.randomSampleRows(State.settings.tableRows);
+      if (!this._sortCol) return DataEngine.sampleRows(State.settings.tableRows);
       const d = this._sortDir, c = this._sortCol;
       return [...State.data].sort((a, b) => {
         const av = a[c], bv = b[c];
@@ -3105,13 +3071,11 @@ const Pages = {
     _renderParams(model) {
       const p = model.params;
       const id = model.id;
-      const sel = (key, opts, tip) => {
-        const selHtml = `<select onchange="Pages.models.updateParam('${id}','${key}',this.value)">
+      const sel = (key, opts) =>
+        `<select onchange="Pages.models.updateParam('${id}','${key}',this.value)">
           ${opts.map(([v,l])=>`<option value="${v}"${String(p[key])===String(v)?' selected':''}>${l}</option>`).join('')}
         </select>`;
-        return selHtml;
-      };
-      const num = (key, attrs, tip) =>
+      const num = (key, attrs) =>
         `<input type="number" value="${p[key]}" ${attrs} onchange="Pages.models.updateParam('${id}','${key}',Number(this.value))">`;
       const field = (label, tip, input) =>
         `<div class="mdl-field"><label>${label} <span class="mdl-tip" title="${tip}">?</span></label>${input}</div>`;
@@ -3753,7 +3717,6 @@ const Pages = {
       const mA = all.find(m=>m.id===a), mB = all.find(m=>m.id===b);
       if (!mA || !mB) return '';
 
-      const opts = ran.map(m=>`<option value="${m.id}">${Fmt.escHtml(m.name)}</option>`).join('');
       const selA = `<select onchange="Pages.models._compareA=this.value;Pages.models.render()">${ran.map(m=>`<option value="${m.id}"${m.id===a?' selected':''}>${Fmt.escHtml(m.name)}</option>`).join('')}</select>`;
       const selB = `<select onchange="Pages.models._compareB=this.value;Pages.models.render()">${ran.map(m=>`<option value="${m.id}"${m.id===b?' selected':''}>${Fmt.escHtml(m.name)}</option>`).join('')}</select>`;
 
