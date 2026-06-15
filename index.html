@@ -414,6 +414,7 @@ html, body {
 .log-level.FILL { color: var(--green); }
 .log-level.ERROR { color: var(--red); }
 .log-level.WARN { color: var(--amber); }
+.log-level.SIGNAL { color: var(--purple); }
 .log-msg { color: var(--text); }
 
 .empty-state {
@@ -422,6 +423,80 @@ html, body {
   color: var(--dim);
   font-size: 12px;
 }
+
+/* RSI PANE */
+#rsi-container {
+  height: 80px;
+  border-top: 1px solid var(--border);
+  flex-shrink: 0;
+}
+
+/* STRATEGIES PANEL */
+#strategies-panel {
+  flex-shrink: 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.strategy-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 10px;
+  border-bottom: 1px solid var(--border);
+}
+.strategy-row:last-child { border-bottom: none; }
+
+.strategy-name {
+  font-family: var(--mono);
+  font-size: 11px;
+  font-weight: 700;
+  width: 80px;
+  flex-shrink: 0;
+}
+
+.strategy-toggle-btn {
+  font-family: var(--mono);
+  font-size: 10px;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 3px;
+  border: 1px solid var(--border);
+  cursor: pointer;
+  letter-spacing: 0.04em;
+  background: none;
+  color: var(--dim);
+  flex-shrink: 0;
+}
+.strategy-toggle-btn.on {
+  background: #0d2e0d;
+  color: var(--green);
+  border-color: var(--green);
+}
+.strategy-toggle-btn:hover { border-color: #555; color: var(--text); }
+
+.strategy-last-signal {
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--dim);
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* RISK BADGE */
+#risk-score {
+  font-family: var(--mono);
+  font-size: 11px;
+  padding: 3px 7px;
+  border-radius: 3px;
+  background: var(--bg3);
+  border: 1px solid var(--border);
+  color: var(--dim);
+}
+#risk-score.low { color: var(--green); border-color: #1a3a1a; }
+#risk-score.mid { color: var(--amber); border-color: #3a3000; }
+#risk-score.high { color: var(--red); border-color: #3a1a1a; }
 
 /* CONNECTION OVERLAY */
 #conn-overlay {
@@ -471,6 +546,7 @@ html, body {
     <span class="header-metric-value" id="h-bp">--</span>
   </div>
   <div id="header-sep"></div>
+  <span id="risk-score">LIQ --</span>
   <span id="shortcuts-hint">B buy &nbsp; S sell</span>
   <span id="clock">--:--:--</span>
 </div>
@@ -509,10 +585,13 @@ html, body {
       <div id="chart-ind-btns">
         <button class="ind-btn active" data-ind="sma20">SMA20</button>
         <button class="ind-btn active" data-ind="sma50">SMA50</button>
+        <button class="ind-btn" data-ind="bb">BB</button>
         <button class="ind-btn" data-ind="vwap">VWAP</button>
+        <button class="ind-btn" data-ind="rsi">RSI</button>
       </div>
     </div>
     <div id="chart-container"></div>
+    <div id="rsi-container" class="hidden"></div>
   </div>
 
   <div id="right-col">
@@ -525,6 +604,14 @@ html, body {
     <div id="orders-panel">
       <div class="panel-header">Open Orders</div>
       <div id="orders-table"></div>
+    </div>
+
+    <div id="strategies-panel">
+      <div class="panel-header">
+        Strategies
+        <span id="auto-badge" style="font-size:10px;text-transform:none;letter-spacing:0;color:var(--dim);">manual</span>
+      </div>
+      <div id="strategy-list"></div>
     </div>
 
     <div id="order-entry-panel">
@@ -592,6 +679,7 @@ const State = {
   watchlist: [],
   snapshots: {},
   quotes: {},
+  strategies: [],
   activeSymbol: null,
   activeTf: '5Min',
   activeInds: new Set(['sma20', 'sma50']),
@@ -642,13 +730,49 @@ const F = {
 const Indicators = {
   sma(bars, period) {
     const out = [];
+    const closes = bars.map(b => b.close);
     for (let i = period - 1; i < bars.length; i++) {
       let sum = 0;
-      for (let j = i - period + 1; j <= i; j++) sum += bars[j].close;
+      for (let j = i - period + 1; j <= i; j++) sum += closes[j];
       out.push({ time: bars[i].time, value: sum / period });
     }
     return out;
   },
+
+  rsi(bars, period = 14) {
+    if (bars.length < period + 1) return [];
+    const closes = bars.map(b => b.close);
+    const deltas = closes.slice(1).map((c, i) => c - closes[i]);
+    const gains = deltas.map(d => Math.max(d, 0));
+    const losses = deltas.map(d => Math.max(-d, 0));
+    let avgGain = gains.slice(0, period).reduce((a, b) => a + b, 0) / period;
+    let avgLoss = losses.slice(0, period).reduce((a, b) => a + b, 0) / period;
+    const val = (ag, al) => al === 0 ? 100 : 100 - 100 / (1 + ag / al);
+    const out = [];
+    for (let i = period; i < bars.length; i++) {
+      if (i > period) {
+        avgGain = (avgGain * (period - 1) + gains[i - 1]) / period;
+        avgLoss = (avgLoss * (period - 1) + losses[i - 1]) / period;
+      }
+      out.push({ time: bars[i].time, value: val(avgGain, avgLoss) });
+    }
+    return out;
+  },
+
+  bollinger(bars, period = 20, nStd = 2) {
+    if (bars.length < period) return { upper: [], lower: [] };
+    const closes = bars.map(b => b.close);
+    const upper = [], lower = [];
+    for (let i = period - 1; i < bars.length; i++) {
+      const window = closes.slice(i - period + 1, i + 1);
+      const mean = window.reduce((a, b) => a + b, 0) / period;
+      const std = Math.sqrt(window.reduce((s, v) => s + (v - mean) ** 2, 0) / period);
+      upper.push({ time: bars[i].time, value: mean + nStd * std });
+      lower.push({ time: bars[i].time, value: mean - nStd * std });
+    }
+    return { upper, lower };
+  },
+
   vwap(bars) {
     const out = [];
     let cumPV = 0, cumVol = 0;
@@ -667,11 +791,15 @@ const Indicators = {
 // ============================================================
 const Chart = (() => {
   let _chart = null;
+  let _rsiChart = null;
   let _candle = null;
   let _vol = null;
   let _sma20 = null;
   let _sma50 = null;
+  let _bbUpper = null;
+  let _bbLower = null;
   let _vwap = null;
+  let _rsiLine = null;
   let _bars = [];
 
   function init() {
@@ -722,9 +850,34 @@ const Chart = (() => {
 
     _sma20 = _chart.addLineSeries({ color: '#e3b341', lineWidth: 1, priceLineVisible: false, lastValueVisible: false });
     _sma50 = _chart.addLineSeries({ color: '#bc8cff', lineWidth: 1, priceLineVisible: false, lastValueVisible: false });
+    _bbUpper = _chart.addLineSeries({ color: '#58a6ff55', lineWidth: 1, priceLineVisible: false, lastValueVisible: false, lineStyle: LightweightCharts.LineStyle.Dotted });
+    _bbLower = _chart.addLineSeries({ color: '#58a6ff55', lineWidth: 1, priceLineVisible: false, lastValueVisible: false, lineStyle: LightweightCharts.LineStyle.Dotted });
     _vwap = _chart.addLineSeries({
       color: '#58a6ff', lineWidth: 1, priceLineVisible: false, lastValueVisible: false,
       lineStyle: LightweightCharts.LineStyle.Dashed,
+    });
+
+    // RSI sub-chart (separate Lightweight Charts instance, synced time axis)
+    const rsiEl = document.getElementById('rsi-container');
+    _rsiChart = LightweightCharts.createChart(rsiEl, {
+      width: rsiEl.clientWidth,
+      height: 80,
+      layout: { background: { color: '#0d0f11' }, textColor: '#6e7681' },
+      grid: { vertLines: { color: '#161a20' }, horzLines: { color: '#161a20' } },
+      crosshair: { mode: LightweightCharts.CrosshairMode.Normal, vertLine: { color: '#3a3e46', labelBackgroundColor: '#21262d' }, horzLine: { visible: false, labelVisible: false } },
+      rightPriceScale: { borderColor: '#1e2229', scaleMargins: { top: 0.1, bottom: 0.1 } },
+      timeScale: { borderColor: '#1e2229', visible: false },
+      handleScroll: false,
+      handleScale: false,
+    });
+    _rsiLine = _rsiChart.addLineSeries({ color: '#58a6ff', lineWidth: 1, priceLineVisible: false, lastValueVisible: true });
+    _rsiLine.createPriceLine({ price: 70, color: '#f8514960', lineWidth: 1, lineStyle: LightweightCharts.LineStyle.Dotted, axisLabelVisible: true });
+    _rsiLine.createPriceLine({ price: 50, color: '#6e768130', lineWidth: 1, lineStyle: LightweightCharts.LineStyle.Dotted, axisLabelVisible: false });
+    _rsiLine.createPriceLine({ price: 30, color: '#3fb95060', lineWidth: 1, lineStyle: LightweightCharts.LineStyle.Dotted, axisLabelVisible: true });
+
+    // Sync RSI chart time axis with main chart
+    _chart.timeScale().subscribeVisibleLogicalRangeChange(range => {
+      if (range && _rsiChart) _rsiChart.timeScale().setVisibleLogicalRange(range);
     });
 
     _chart.subscribeCrosshairMove(p => {
@@ -735,6 +888,8 @@ const Chart = (() => {
 
     new ResizeObserver(() => {
       _chart.applyOptions({ width: el.clientWidth, height: el.clientHeight });
+      const rsiEl2 = document.getElementById('rsi-container');
+      if (_rsiChart) _rsiChart.applyOptions({ width: rsiEl2.clientWidth });
     }).observe(el);
   }
 
@@ -781,6 +936,19 @@ const Chart = (() => {
     _sma20.setData(State.activeInds.has('sma20') && _bars.length >= 20 ? Indicators.sma(_bars, 20) : []);
     _sma50.setData(State.activeInds.has('sma50') && _bars.length >= 50 ? Indicators.sma(_bars, 50) : []);
     _vwap.setData(State.activeInds.has('vwap') ? Indicators.vwap(_bars) : []);
+    if (State.activeInds.has('bb') && _bars.length >= 20) {
+      const { upper, lower } = Indicators.bollinger(_bars, 20, 2);
+      _bbUpper.setData(upper);
+      _bbLower.setData(lower);
+    } else {
+      _bbUpper.setData([]);
+      _bbLower.setData([]);
+    }
+    if (State.activeInds.has('rsi') && _bars.length >= 15) {
+      _rsiLine.setData(Indicators.rsi(_bars, 14));
+    } else {
+      _rsiLine.setData([]);
+    }
   }
 
   function _ohlc(b) {
@@ -794,6 +962,12 @@ const Chart = (() => {
   function toggleInd(ind) {
     if (State.activeInds.has(ind)) State.activeInds.delete(ind);
     else State.activeInds.add(ind);
+    // Show/hide RSI sub-chart
+    const rsiEl = document.getElementById('rsi-container');
+    rsiEl.classList.toggle('hidden', !State.activeInds.has('rsi'));
+    if (State.activeInds.has('rsi') && _rsiChart) {
+      _rsiChart.applyOptions({ width: rsiEl.clientWidth });
+    }
     _renderInds();
   }
 
@@ -861,6 +1035,22 @@ const WS = (() => {
           Chart.update(msg);
           document.getElementById('chart-last').textContent = F.price(msg.close);
         }
+        break;
+
+      case 'signal': {
+        const skipped = msg.action && msg.action.startsWith('SKIPPED');
+        const dir = msg.direction === 'exit' ? 'EXIT' : 'ENTRY';
+        const conf = Math.round((msg.confidence || 0) * 100);
+        const act = msg.action || '';
+        Log.signal(`${msg.symbol} ${msg.strategy.toUpperCase()} ${dir} conf=${conf}% — ${act}`);
+        Strategies.updateLastSignal(msg.strategy, msg);
+        break;
+      }
+
+      case 'account':
+        State.account = { ...State.account, ...msg.account };
+        if (msg.risk_score != null) _updateRiskScore(msg.risk_score);
+        Header.render();
         break;
 
       case 'order_update': {
@@ -1208,10 +1398,82 @@ const Log = {
     c.insertBefore(row, c.firstChild);
     while (c.children.length > 300) c.removeChild(c.lastChild);
   },
-  info(m) { this._add('INFO', m); },
-  fill(m) { this._add('FILL', m); },
-  error(m) { this._add('ERROR', m); },
-  warn(m)  { this._add('WARN', m); },
+  info(m)   { this._add('INFO', m); },
+  fill(m)   { this._add('FILL', m); },
+  error(m)  { this._add('ERROR', m); },
+  warn(m)   { this._add('WARN', m); },
+  signal(m) { this._add('SIGNAL', m); },
+};
+
+// ============================================================
+// RISK SCORE
+// ============================================================
+function _updateRiskScore(score) {
+  const el = document.getElementById('risk-score');
+  if (!el) return;
+  el.textContent = 'LIQ ' + score.toFixed(1);
+  el.className = score < 3 ? 'low' : score < 6 ? 'mid' : 'high';
+}
+
+// ============================================================
+// STRATEGIES
+// ============================================================
+const Strategies = {
+  _data: [],
+
+  render(strategies) {
+    this._data = strategies || [];
+    const c = document.getElementById('strategy-list');
+    if (!this._data.length) {
+      c.innerHTML = '<div class="empty-state">No strategies configured</div>';
+      return;
+    }
+    c.innerHTML = '';
+    for (const s of this._data) {
+      const row = document.createElement('div');
+      row.className = 'strategy-row';
+      const lastSig = s.last_signal;
+      const sigText = lastSig
+        ? `${lastSig.symbol} ${lastSig.direction.toUpperCase()} ${Math.round(lastSig.confidence * 100)}% — ${lastSig.action}`
+        : 'no signals yet';
+      row.innerHTML =
+        '<span class="strategy-name">' + s.name.toUpperCase() + '</span>' +
+        '<button class="strategy-toggle-btn' + (s.enabled ? ' on' : '') + '" data-name="' + s.name + '">' +
+          (s.enabled ? 'ON' : 'OFF') +
+        '</button>' +
+        '<span class="strategy-last-signal' + (s.enabled ? '' : ' dim') + '" id="strat-last-' + s.name + '">' + sigText + '</span>';
+      c.appendChild(row);
+    }
+    const anyOn = this._data.some(s => s.enabled);
+    document.getElementById('auto-badge').textContent = anyOn ? 'AUTO ON' : 'manual';
+    document.getElementById('auto-badge').style.color = anyOn ? 'var(--green)' : 'var(--dim)';
+
+    c.querySelectorAll('.strategy-toggle-btn').forEach(btn => {
+      btn.addEventListener('click', () => this._toggle(btn.dataset.name, btn.classList.contains('on')));
+    });
+  },
+
+  async _toggle(name, currentlyOn) {
+    try {
+      const endpoint = currentlyOn ? 'disable' : 'enable';
+      const res = await API._fetch('POST', `/strategies/${name}/${endpoint}`);
+      if (res.ok) {
+        State.strategies = res.strategies;
+        this.render(res.strategies);
+        Log.info(`Strategy ${name} ${currentlyOn ? 'disabled' : 'enabled'}`);
+      }
+    } catch (e) {
+      Log.error('Strategy toggle failed: ' + e.message);
+    }
+  },
+
+  updateLastSignal(name, sig) {
+    const el = document.getElementById('strat-last-' + name);
+    if (!el) return;
+    const text = `${sig.symbol} ${sig.direction.toUpperCase()} ${Math.round(sig.confidence * 100)}% — ${sig.action}`;
+    el.textContent = text;
+    el.style.color = sig.action && sig.action.startsWith('SKIPPED') ? 'var(--dim)' : 'var(--purple)';
+  },
 };
 
 // ============================================================
@@ -1277,10 +1539,13 @@ const App = {
       State.orders = data.orders || [];
       State.watchlist = data.watchlist || [];
       State.snapshots = data.snapshots || {};
+      State.strategies = data.strategies || [];
+      if (data.risk_score != null) _updateRiskScore(data.risk_score);
       Header.render();
       Watchlist.render();
       Positions.render();
       Orders.render();
+      Strategies.render(State.strategies);
     } catch (e) {
       Log.error('State load: ' + e.message);
     }
@@ -1293,10 +1558,13 @@ const App = {
       State.account = data.account || {};
       State.positions = data.positions || [];
       State.orders = data.orders || [];
+      State.strategies = data.strategies || [];
       if (data.snapshots) Object.assign(State.snapshots, data.snapshots);
+      if (data.risk_score != null) _updateRiskScore(data.risk_score);
       Header.render();
       Positions.render();
       Orders.render();
+      Strategies.render(State.strategies);
     } catch (_) {}
   },
 

@@ -5,5 +5,15 @@
     "max_position_pct": 0.05,
     "daily_loss_cap_pct": 0.02,
     "max_open_positions": 10
+  },
+  "strategies": {
+    "momentum": {
+      "enabled": false,
+      "symbols": ["AAPL", "MSFT", "NVDA", "TSLA"],
+      "stop_pct": 0.02,
+      "take_profit_pct": 0.04,
+      "kelly_fraction": 0.25,
+      "max_position_pct": 0.05
+    }
   }
 }

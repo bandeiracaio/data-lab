@@ -18,6 +18,17 @@ data_queue: queue.Queue = queue.Queue(maxsize=2000)
 _subscribed_symbols: set[str] = set()
 _market_stream: Optional[StockDataStream] = None
 _stream_lock = threading.Lock()
+_quote_cache: dict[str, dict] = {}
+_strategy_callback = None
+
+
+def set_strategy_callback(fn) -> None:
+    global _strategy_callback
+    _strategy_callback = fn
+
+
+def get_quotes() -> dict:
+    return dict(_quote_cache)
 
 TIMEFRAME_MAP = {
     "1Min": TimeFrame(1, TimeFrameUnit.Minute),
@@ -45,11 +56,14 @@ def _put(msg: dict) -> None:
 
 
 async def _quote_handler(data) -> None:
+    bid = float(data.bid_price) if data.bid_price else None
+    ask = float(data.ask_price) if data.ask_price else None
+    _quote_cache[data.symbol] = {"bid": bid, "ask": ask}
     _put({
         "type": "quote",
         "symbol": data.symbol,
-        "bid": float(data.bid_price) if data.bid_price else None,
-        "ask": float(data.ask_price) if data.ask_price else None,
+        "bid": bid,
+        "ask": ask,
         "bid_size": int(data.bid_size) if data.bid_size else 0,
         "ask_size": int(data.ask_size) if data.ask_size else 0,
         "timestamp": data.timestamp.isoformat(),
@@ -57,7 +71,7 @@ async def _quote_handler(data) -> None:
 
 
 async def _bar_handler(data) -> None:
-    _put({
+    bar = {
         "type": "bar",
         "symbol": data.symbol,
         "time": int(data.timestamp.timestamp()),
@@ -67,7 +81,15 @@ async def _bar_handler(data) -> None:
         "close": float(data.close),
         "volume": float(data.volume),
         "vwap": float(data.vwap) if hasattr(data, "vwap") and data.vwap else None,
-    })
+    }
+    _put(bar)
+    if _strategy_callback:
+        try:
+            events = _strategy_callback(bar)
+            for ev in events:
+                _put(ev)
+        except Exception as e:
+            _put({"type": "error", "source": "strategy", "message": str(e)})
 
 
 async def _trade_handler(data) -> None:
