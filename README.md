@@ -1,28 +1,36 @@
-# Data Lab
+# Trading Terminal
 
-Interactive data analysis and dashboard tool — single `index.html` file, no server, no build step.
+Algorithmic trading terminal — real market data, paper and live execution, rule-based strategies.
 
-Open `index.html` in any modern browser. The Titanic dataset loads automatically. Drop any CSV file onto the page to load your own data.
+## Modes
 
-## Features
+- **Paper**: Alpaca paper account. Real data, simulated fills. No money at risk.
+- **Live**: Alpaca live account. Real fills. Real money.
 
-- Flat and OLAP cube CSV support (weight-aware statistics throughout)
-- Overview with data quality grid and sample table
-- Explore: distributions, correlation heatmap, scatter chart builder
-- Column detail: weighted stats, distributions, cross-column correlations
-- Transform pipeline: filter, rollup, pivot, calculated columns
-- Dashboard builder with drag-and-drop grid and standalone HTML export
-- Four themes: Dark, Light, Nord, Solarized
+Same codebase, different credentials. Mode is set in `.env`, shown permanently in the UI header.
 
-## Second test dataset
+## Stack
 
-**Online Retail II** (UCI Machine Learning Repository) — ~1M transactions, suitable for cube aggregation.
+- **Backend**: Python / FastAPI / asyncio — broker API, WebSocket relay, strategy engine
+- **Frontend**: Single `index.html` — vanilla JS, no build step
+- **Broker**: [Alpaca Markets](https://alpaca.markets) — free paper + live trading API
+- **Charts**: [Lightweight Charts](https://tradingview.github.io/lightweight-charts/) — TradingView open source
 
-## Libraries
+## Setup
 
-- [Plotly.js](https://plotly.com/javascript/) 2.35.2 — charts
-- [Papa Parse](https://www.papaparse.com/) 5.4.1 — CSV parsing
+```bash
+# 1. Copy env template and fill in your Alpaca credentials
+cp .env.example .env
+
+# 2. Install backend dependencies
+pip install -r backend/requirements.txt
+
+# 3. Start backend
+cd backend && uvicorn main:app --port 8000
+
+# 4. Open index.html in your browser
+```
 
 ## Spec
 
-See [SPEC.md](SPEC.md) for full product specification and build phases.
+See [SPEC.md](SPEC.md) for full technical specification, architecture, and implementation phases.
