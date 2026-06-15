@@ -42,6 +42,10 @@ agent = TradingAgent(
     min_confidence=settings.MIN_EDGE_CONFIDENCE,
     kelly_fraction=settings.KELLY_FRACTION,
     broadcast_fn=manager.broadcast,
+    poly_api_key=settings.POLY_API_KEY,
+    poly_api_secret=settings.POLY_API_SECRET,
+    poly_passphrase=settings.POLY_PASSPHRASE,
+    poly_private_key=settings.POLY_PRIVATE_KEY,
 )
 
 agent_task: asyncio.Task | None = None

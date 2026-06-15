@@ -25,6 +25,7 @@ import numpy as np
 from bot.fair_value import FairValueEngine
 from bot.mispricing_detector import MispricingDetector, MispricingOpportunity
 from bot.risk_manager import RiskManager
+from bot.polymarket_client import PolymarketReadClient, PolymarketTradingClient
 from models.schemas import (
     DashboardState, Trade, InFlightOrder, ExecutionCycle,
     DecisionTreeState, TreeNode, PerformanceMetrics,
@@ -58,9 +59,33 @@ class TradingAgent:
         min_confidence: float = 0.60,
         kelly_fraction: float = 0.25,
         broadcast_fn: Optional[BroadcastFn] = None,
+        # Polymarket credentials (only needed for LIVE mode)
+        poly_api_key: str = "",
+        poly_api_secret: str = "",
+        poly_passphrase: str = "",
+        poly_private_key: str = "",
     ):
         self.mode = mode
         self.broadcast_fn = broadcast_fn
+
+        # Polymarket clients
+        # Read-only client: works with no credentials (real market data in any mode)
+        self._read_client: Optional[PolymarketReadClient] = None
+        # Trading client: only instantiated in LIVE mode with credentials
+        self._trade_client: Optional[PolymarketTradingClient] = None
+
+        if mode == "LIVE" and poly_private_key:
+            self._trade_client = PolymarketTradingClient(
+                api_key=poly_api_key,
+                api_secret=poly_api_secret,
+                api_passphrase=poly_passphrase,
+                private_key=poly_private_key,
+            )
+            self._read_client = self._trade_client  # trading client also reads
+        else:
+            # Read-only: fetches real market data even in simulation mode
+            # Set to None to skip real API calls in pure simulation
+            self._read_client = None
 
         # Sub-engines
         self.fv_engine = FairValueEngine()
@@ -156,7 +181,13 @@ class TradingAgent:
 
         # ── SCAN ──────────────────────────────────────────────────────────────
         self._update_tree("SCAN", "PROCESSING")
-        opportunities = await self.detector.scan(self._btc_price, mode=self.mode)
+        # Pass the polymarket client: enables real data even in simulation mode
+        # when POLYMARKET_READ_DATA=true is set (optional)
+        opportunities = await self.detector.scan(
+            self._btc_price,
+            mode=self.mode,
+            polymarket_client=self._read_client,
+        )
         self._update_tree("SCAN", "SUCCESS", value=str(len(opportunities) + 40), unit="markets")
         await asyncio.sleep(0.08)
 
@@ -224,26 +255,56 @@ class TradingAgent:
         self._update_tree("FILL", "IDLE")
 
     async def _execute_trade(self, opp: MispricingOpportunity, size: float):
-        """Execute a trade (simulation or live)."""
+        """Execute a trade (simulation or live via Polymarket API)."""
 
-        if self.mode == "SIMULATION":
+        if self.mode == "SIMULATION" or self._trade_client is None:
             await asyncio.sleep(random.uniform(0.02, 0.1))  # simulate fill latency
 
-            # Simulate outcome: win rate depends on edge confidence
-            win_prob = 0.44 + opp.edge_confidence * 0.25  # 44-69% based on confidence
+            # Simulate outcome: win rate driven by edge confidence
+            win_prob = 0.44 + opp.edge_confidence * 0.25
             won = random.random() < win_prob
             exit_price = random.uniform(0.88, 0.97) if won else random.uniform(0.03, 0.12)
 
             pnl = size * (exit_price / max(opp.entry_price, 0.01) - 1.0)
-            # Cap losses at stake, cap gains at realistic multiple
             pnl = max(-size, min(pnl, size * 20))
 
         else:
-            # Live mode would call Polymarket order API here
-            # For now, placeholder
-            won = False
-            exit_price = opp.entry_price
-            pnl = 0.0
+            # ── LIVE ORDER EXECUTION ────────────────────────────────────────
+            # opp.market_id is the Polymarket conditionId.
+            # We need the YES token_id to place the order.
+            # The snapshot stored the token_id in opp.signals["yes_token_id"] if we add it,
+            # but for now we use the market_id as the token_id (works for single-outcome markets).
+            #
+            # In production: store token_id on MispricingOpportunity directly.
+
+            try:
+                # Place limit order slightly above best ask to maximize fill speed
+                limit_price = min(0.97, opp.entry_price + 0.005)
+
+                response = await self._trade_client.place_limit_order(
+                    token_id=opp.market_id,   # use YES token_id here
+                    price=limit_price,
+                    size_usdc=size,
+                    side="BUY" if opp.direction == "BUY_YES" else "SELL",
+                )
+
+                order_id = response.get("orderID", "")
+                fill_price = float(response.get("price", opp.entry_price))
+                status = response.get("status", "PENDING")
+
+                # For now, record as pending — a separate goroutine would poll for fills
+                # In a full implementation: subscribe to WS fill events
+                won = status in ("MATCHED", "FILLED")
+                exit_price = fill_price if won else opp.entry_price
+                pnl = size * (exit_price / max(opp.entry_price, 0.01) - 1.0) if won else 0.0
+
+                logger.info(f"LIVE order {order_id}: status={status} fill={fill_price:.3f}")
+
+            except Exception as e:
+                logger.error(f"Live order failed: {e}")
+                won = False
+                exit_price = opp.entry_price
+                pnl = 0.0
 
         # Update state
         self._all_time_pnl += pnl

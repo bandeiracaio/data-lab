@@ -15,9 +15,12 @@ Strategy:
 
 from __future__ import annotations
 import asyncio
+import logging
 import time
 import math
 import random
+
+logger = logging.getLogger(__name__)
 import numpy as np
 from dataclasses import dataclass
 from typing import Optional
@@ -64,12 +67,14 @@ class MispricingDetector:
         min_confidence: float = 0.60,
         max_bankroll: float = 10_000.0,
         kelly_fraction: float = 0.25,
+        min_market_liquidity: float = 2_000.0,
     ):
         self.fv_engine = fair_value_engine
         self.min_edge_pct = min_edge_pct
         self.min_confidence = min_confidence
         self.max_bankroll = max_bankroll
         self.kelly_fraction = kelly_fraction
+        self.min_market_liquidity = min_market_liquidity
         self._scan_count = 0
 
     # ── Main scanning entry point ─────────────────────────────────────────────
@@ -178,47 +183,88 @@ class MispricingDetector:
     async def _scan_live(
         self, btc_price: float, client
     ) -> list[MispricingOpportunity]:
-        """Real Polymarket API scanning — requires authenticated client."""
+        """
+        Real Polymarket API scanning.
+
+        client must be PolymarketReadClient (no credentials needed for scanning)
+        or PolymarketTradingClient (for order placement).
+        """
         if client is None:
             return []
 
         try:
             markets = await client.get_markets(keyword="bitcoin", active=True, limit=50)
         except Exception as e:
+            logger.error(f"Market fetch failed: {e}")
             return []
 
         opportunities = []
         for market in markets:
             try:
-                ob = await client.get_order_book(market["conditionId"])
-                ctx = self._build_context_from_live(market, ob, btc_price)
+                # get_full_snapshot fetches order book + recent trades in one call
+                snap = await client.get_full_snapshot(market)
+                if snap is None:
+                    continue
+
+                # Skip illiquid markets
+                if snap["total_liquidity"] < self.min_market_liquidity:
+                    continue
+
+                ctx = self._build_context_from_snapshot(snap, btc_price)
                 estimate = self.fv_engine.estimate(ctx)
 
-                best_ask = float(ob.get("asks", [{"price": 0.5}])[0]["price"])
-                edge = estimate.fair_value - best_ask
+                best_ask = snap["best_ask"]
+                best_bid = snap["best_bid"]
 
-                if edge >= self.min_edge_pct and estimate.confidence >= self.min_confidence:
-                    ev = edge * estimate.confidence
-                    p = estimate.fair_value
-                    b = (1.0 / best_ask) - 1.0
-                    kelly_full = (p * b - (1 - p)) / max(b, 1e-6)
-                    size = max(10.0, kelly_full * self.kelly_fraction * self.max_bankroll)
+                # Check both sides: buy YES or buy NO
+                yes_edge = estimate.fair_value - best_ask
+                no_edge  = (1 - estimate.fair_value) - (1 - best_bid)
 
-                    opportunities.append(MispricingOpportunity(
-                        market_id=market["conditionId"],
-                        market_label=market.get("question", "Unknown")[:60],
-                        direction="BUY_YES",
-                        entry_price=best_ask,
-                        fair_value=estimate.fair_value,
-                        misprice_pct=edge,
-                        edge_confidence=estimate.confidence,
-                        expected_value=ev,
-                        order_flow_imbalance=0.5,
-                        recommended_size=size,
-                        time_to_expiry_hours=24.0,
-                        signals=estimate.signals,
-                    ))
-            except Exception:
+                if yes_edge >= no_edge and yes_edge >= self.min_edge_pct:
+                    direction = "BUY_YES"
+                    entry     = best_ask
+                    edge      = yes_edge
+                elif no_edge > yes_edge and no_edge >= self.min_edge_pct:
+                    direction = "BUY_NO"
+                    entry     = 1 - best_bid
+                    edge      = no_edge
+                else:
+                    continue
+
+                if estimate.confidence < self.min_confidence:
+                    continue
+
+                ev = edge * estimate.confidence
+                p  = estimate.fair_value if direction == "BUY_YES" else 1 - estimate.fair_value
+                b  = (1.0 / max(entry, 0.01)) - 1.0
+                kelly_full = (p * b - (1 - p)) / max(b, 1e-6)
+                size = max(10.0, kelly_full * self.kelly_fraction * self.max_bankroll)
+
+                # Parse time to expiry
+                import dateutil.parser
+                try:
+                    end = dateutil.parser.parse(snap["end_date"])
+                    from datetime import datetime, timezone
+                    hours_left = (end.replace(tzinfo=timezone.utc) - datetime.now(timezone.utc)).total_seconds() / 3600
+                except Exception:
+                    hours_left = 4.0
+
+                opportunities.append(MispricingOpportunity(
+                    market_id=snap["condition_id"],
+                    market_label=snap["question"][:60],
+                    direction=direction,
+                    entry_price=entry,
+                    fair_value=estimate.fair_value,
+                    misprice_pct=edge,
+                    edge_confidence=estimate.confidence,
+                    expected_value=ev,
+                    order_flow_imbalance=snap["bid_volume"] / max(snap["total_liquidity"], 1),
+                    recommended_size=size,
+                    time_to_expiry_hours=max(0.1, hours_left),
+                    signals=estimate.signals,
+                ))
+            except Exception as e:
+                logger.debug(f"Market scan error: {e}")
                 continue
 
         return sorted(opportunities, key=lambda o: o.expected_value, reverse=True)
@@ -239,29 +285,58 @@ class MispricingDetector:
         return p_above if direction == "UP" else 1 - p_above
 
     @staticmethod
-    def _build_context_from_live(market: dict, ob: dict, btc_price: float) -> "MarketContext":
-        """Build MarketContext from live Polymarket data."""
-        bids = ob.get("bids", [])
-        asks = ob.get("asks", [])
-        best_bid = float(bids[0]["price"]) if bids else 0.45
-        best_ask = float(asks[0]["price"]) if asks else 0.55
-        bid_vol = sum(float(b.get("size", 0)) for b in bids[:5])
-        ask_vol = sum(float(a.get("size", 0)) for a in asks[:5])
+    def _build_context_from_snapshot(snap: dict, btc_price: float) -> "MarketContext":
+        """Build MarketContext from a PolymarketReadClient.get_full_snapshot() result."""
+        from bot.fair_value import OrderBookSnapshot, RecentTrade
+
+        ob = OrderBookSnapshot(
+            best_bid=snap["best_bid"],
+            best_ask=snap["best_ask"],
+            bid_volume=snap["bid_volume"],
+            ask_volume=snap["ask_volume"],
+            mid_price=snap["mid_price"],
+            spread=snap["spread"],
+        )
+
+        # Parse recent trades from API response
+        recent_trades = []
+        for t in snap.get("recent_trades", []):
+            try:
+                recent_trades.append(RecentTrade(
+                    price=float(t.get("price", snap["mid_price"])),
+                    size=float(t.get("size", 0)),
+                    is_buy=t.get("side", "").upper() == "BUY",
+                    timestamp=float(t.get("timestamp", time.time())),
+                ))
+            except Exception:
+                continue
+
+        # Detect if this is a BTC threshold market
+        question = snap.get("question", "").upper()
+        is_btc_level = "BTC" in question and ("$" in question or "USD" in question)
+        direction = "UP" if "ABOVE" in question or "HIGHER" in question or ">" in question else "DOWN"
+
+        # Try to parse threshold from question e.g. "Will BTC be above $65,000?"
+        threshold = None
+        if is_btc_level:
+            import re
+            matches = re.findall(r'\$[\d,]+', question)
+            if matches:
+                try:
+                    threshold = float(matches[0].replace("$", "").replace(",", ""))
+                except ValueError:
+                    pass
 
         return MarketContext(
-            order_book=type("OB", (), {
-                "best_bid": best_bid,
-                "best_ask": best_ask,
-                "bid_volume": bid_vol,
-                "ask_volume": ask_vol,
-                "mid_price": (best_bid + best_ask) / 2,
-                "spread": best_ask - best_bid,
-            })(),
-            recent_trades=[],
+            order_book=ob,
+            recent_trades=recent_trades,
             btc_price_now=btc_price,
-            btc_price_5m_ago=btc_price,
-            time_to_expiry_hours=24.0,
-            prior_resolution_rate=(best_bid + best_ask) / 2,
+            btc_price_5m_ago=btc_price,  # TODO: feed real 5m-ago price
+            time_to_expiry_hours=4.0,    # Will be overridden from snap
+            market_type="BTC_LEVEL" if is_btc_level else "GENERIC",
+            threshold=threshold,
+            direction=direction,
+            prior_resolution_rate=snap["mid_price"],
         )
 
     @property
