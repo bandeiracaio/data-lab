@@ -1,0 +1,9 @@
+{
+  "watchlist": ["SPY", "QQQ", "AAPL", "MSFT", "NVDA", "TSLA", "AMZN", "META"],
+  "default_timeframe": "5Min",
+  "risk": {
+    "max_position_pct": 0.05,
+    "daily_loss_cap_pct": 0.02,
+    "max_open_positions": 10
+  }
+}
